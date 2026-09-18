@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Shopee Deals — Painel</title>
+<style>
+  :root {
+    --bg: #14161a;
+    --panel: #1c1f26;
+    --panel-alt: #22262f;
+    --text: #e9ebf0;
+    --text-dim: #9aa1ad;
+    --accent: #ff7a45;
+    --accent-dim: #a6461f;
+    --ok: #4fae7a;
+    --warn: #e0b23d;
+    --danger: #e0524d;
+    --border: #2b2f39;
+    --radius: 10px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-size: 15px;
+    line-height: 1.45;
+  }
+  header {
+    padding: 20px 16px 8px;
+  }
+  header h1 {
+    font-size: 20px;
+    margin: 0 0 2px;
+    letter-spacing: -0.01em;
+  }
+  header p { margin: 0; color: var(--text-dim); font-size: 13px; }
+  main { padding: 12px 16px 80px; max-width: 720px; margin: 0 auto; }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+    margin-bottom: 12px;
+  }
+  .card h2 { font-size: 14px; margin: 0 0 10px; color: var(--text-dim); font-weight: 600; }
+  .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .stat { background: var(--panel-alt); border-radius: 8px; padding: 10px 12px; }
+  .stat .value { font-size: 22px; font-weight: 700; }
+  .stat .label { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
+  .pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+  .pill.ok { background: rgba(79,174,122,0.15); color: var(--ok); }
+  .pill.warn { background: rgba(224,178,61,0.15); color: var(--warn); }
+  .pill.danger { background: rgba(224,82,77,0.15); color: var(--danger); }
+  button {
+    font: inherit;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 14px;
+    cursor: pointer;
+    font-weight: 600;
+  }
+  .btn-primary { background: var(--accent); color: #1a0e08; }
+  .btn-primary:active { background: var(--accent-dim); }
+  .btn-secondary { background: var(--panel-alt); color: var(--text); border: 1px solid var(--border); }
+  .btn-danger { background: rgba(224,82,77,0.15); color: var(--danger); }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; }
+  input, select {
+    width: 100%;
+    background: var(--panel-alt);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 9px 10px;
+    border-radius: 8px;
+    font: inherit;
+    margin-top: 4px;
+  }
+  label { display: block; font-size: 12px; color: var(--text-dim); margin-top: 10px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--border); }
+  th { color: var(--text-dim); font-weight: 600; }
+  #login-screen { max-width: 320px; margin: 60px auto; padding: 0 16px; }
+  #app { display: none; }
+  .msg { font-size: 13px; margin-top: 8px; }
+  .msg.error { color: var(--danger); }
+  .msg.success { color: var(--ok); }
+  a { color: var(--accent); }
+  .offer-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+  .offer-row:last-child { border-bottom: none; }
+  .offer-name { font-size: 13px; }
+  .offer-reason { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+  .btn-approve { background: rgba(79,174,122,0.15); color: var(--ok); font-size: 12px; padding: 6px 10px; white-space: nowrap; }
+  .empty-hint { font-size: 13px; color: var(--text-dim); }
+</style>
+</head>
+<body>
+
+<div id="login-screen">
+  <h1 style="margin-bottom:4px">Shopee Deals</h1>
+  <p style="color:var(--text-dim);margin-top:0">Entrar no painel administrativo</p>
+  <label>E-mail<input id="login-email" type="email" autocomplete="username" /></label>
+  <label>Senha<input id="login-password" type="password" autocomplete="current-password" /></label>
+  <div class="row" style="margin-top:14px">
+    <button class="btn-primary" onclick="login()">Entrar</button>
+  </div>
+  <div id="login-msg" class="msg"></div>
+</div>
+
+<div id="app">
+  <header>
+    <h1>Shopee Deals</h1>
+    <p>Painel administrativo</p>
+  </header>
+  <main>
+
+    <div class="card">
+      <h2>Status</h2>
+      <div class="stat-grid">
+        <div class="stat"><div class="value" id="stat-mode">—</div><div class="label">Modo efetivo</div></div>
+        <div class="stat"><div class="value" id="stat-active">—</div><div class="label">Execução em andamento</div></div>
+      </div>
+      <p style="margin-top:10px;font-size:13px;color:var(--text-dim)">
+        Última execução finalizada: <span id="stat-last">—</span><br/>
+        Janela de funcionamento: <span id="stat-hours">—</span><br/>
+        Versão: <span id="stat-version">—</span>
+      </p>
+      <div class="row" style="margin-top:12px">
+        <button class="btn-primary" onclick="runNow()">Executar agora</button>
+        <button class="btn-secondary" onclick="killSwitch('pause')">Pausar automação</button>
+        <button class="btn-secondary" onclick="killSwitch('resume')">Retomar automação</button>
+        <button class="btn-danger" onclick="killSwitch('force_dry_run')">Forçar DRY_RUN</button>
+      </div>
+      <div id="action-msg" class="msg"></div>
+    </div>
+
+    <div class="card">
+      <h2>Execuções recentes</h2>
+      <table id="runs-table">
+        <thead><tr><th>Início</th><th>Modo</th><th>Status</th><th>Selecionadas</th><th>Erros</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h2>Ofertas rejeitadas</h2>
+      <div id="rejected-list"></div>
+    </div>
+
+    <div class="card">
+      <h2>Ofertas publicadas</h2>
+      <div id="deals-list"></div>
+    </div>
+
+    <div class="card">
+      <h2>Configurações principais</h2>
+      <label>Desconto mínimo (%)<input id="cfg-minDiscountPercent" type="number" /></label>
+      <label>Avaliação mínima<input id="cfg-minRating" type="number" step="0.1" /></label>
+      <label>Máx. ofertas por rodada<input id="cfg-maxOffersPerRound" type="number" /></label>
+      <label>Máx. ofertas por dia<input id="cfg-maxOffersPerDay" type="number" /></label>
+      <label>Intervalo entre rodadas (min)<input id="cfg-intervalBetweenRoundsMinutes" type="number" /></label>
+      <div class="row" style="margin-top:12px">
+        <button class="btn-primary" onclick="saveSettings()">Salvar configurações</button>
+      </div>
+      <div id="settings-msg" class="msg"></div>
+    </div>
+
+  </main>
+</div>
+
+<script>
+  async function api(path, opts) {
+    const res = await fetch(path, { headers: { "Content-Type": "application/json" }, ...opts });
+    if (res.status === 401) { showLogin(); throw new Error("not authenticated"); }
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText);
+    return res.json();
+  }
+
+  function showLogin() {
+    document.getElementById("login-screen").style.display = "block";
+    document.getElementById("app").style.display = "none";
+  }
+  function showApp() {
+    document.getElementById("login-screen").style.display = "none";
+    document.getElementById("app").style.display = "block";
+    refreshAll();
+  }
+
+  async function login() {
+    const email = document.getElementById("login-email").value;
+    const password = document.getElementById("login-password").value;
+    const msg = document.getElementById("login-msg");
+    msg.textContent = "";
+    try {
+      await api("/api/login", { method: "POST", body: JSON.stringify({ email, password }) });
+      showApp();
+    } catch (e) {
+      msg.textContent = e.message;
+      msg.className = "msg error";
+    }
+  }
+
+  async function refreshAll() {
+    await Promise.all([loadDashboard(), loadRuns(), loadSettings(), loadRejected(), loadDeals()]);
+  }
+
+  async function loadDashboard() {
+    const d = await api("/api/dashboard");
+    document.getElementById("stat-mode").textContent = d.effectiveMode;
+    document.getElementById("stat-active").textContent = d.hasActiveRun ? "Sim" : "Não";
+    document.getElementById("stat-last").textContent = d.lastFinishedAt ? new Date(d.lastFinishedAt).toLocaleString("pt-BR") : "nunca";
+    document.getElementById("stat-hours").textContent = d.operatingHours.start + "h – " + d.operatingHours.end + "h";
+    document.getElementById("stat-version").textContent = d.version;
+  }
+
+  async function loadRuns() {
+    const runs = await api("/api/runs?limit=10");
+    const tbody = document.querySelector("#runs-table tbody");
+    tbody.innerHTML = "";
+    for (const r of runs) {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td>${new Date(r.startedAt).toLocaleString("pt-BR")}</td><td>${r.mode}</td><td>${r.status}</td><td>${r.dealsSelected}</td><td>${r.errorsCount}</td>`;
+      tbody.appendChild(tr);
+    }
+  }
+
+  async function loadRejected() {
+    const rows = await api("/api/rejections?limit=20");
+    const container = document.getElementById("rejected-list");
+    container.innerHTML = "";
+    if (rows.length === 0) {
+      container.innerHTML = '<p class="empty-hint">Nenhuma rejeição recente.</p>';
+      return;
+    }
+    for (const r of rows) {
+      const div = document.createElement("div");
+      div.className = "offer-row";
+      const approveButton = r.canApprove
+        ? `<button class="btn-approve" onclick="approveOffer('${r.id}')">Aprovar</button>`
+        : r.manuallyApprovedAt
+          ? '<span class="pill ok">aprovada</span>'
+          : "";
+      div.innerHTML = `
+        <div>
+          <div class="offer-name">${r.productName || r.shopeeItemId}</div>
+          <div class="offer-reason">${r.reason}${r.details ? " — " + r.details : ""}</div>
+        </div>
+        ${approveButton}
+      `;
+      container.appendChild(div);
+    }
+  }
+
+  async function approveOffer(id) {
+    const msg = document.getElementById("action-msg");
+    try {
+      await api(`/api/rejections/${id}/approve`, { method: "POST" });
+      msg.textContent = "Oferta aprovada manualmente.";
+      msg.className = "msg success";
+      refreshAll();
+    } catch (e) {
+      msg.textContent = e.message;
+      msg.className = "msg error";
+    }
+  }
+
+  async function loadDeals() {
+    const rows = await api("/api/deals?limit=20");
+    const container = document.getElementById("deals-list");
+    container.innerHTML = "";
+    if (rows.length === 0) {
+      container.innerHTML = '<p class="empty-hint">Nenhuma oferta publicada ainda.</p>';
+      return;
+    }
+    for (const d of rows) {
+      const div = document.createElement("div");
+      div.className = "offer-row";
+      const productName = d.product ? d.product.name : d.productName;
+      const badge = d.approvedManually ? '<span class="pill warn">manual</span>' : "";
+      div.innerHTML = `
+        <div>
+          <div class="offer-name">${productName}</div>
+          <div class="offer-reason">R$ ${Number(d.priceAtPublish).toFixed(2)} · score ${Number(d.dealScore).toFixed(0)} · ${d.channel}</div>
+        </div>
+        ${badge}
+      `;
+      container.appendChild(div);
+    }
+  }
+
+  async function loadSettings() {
+    const s = await api("/api/settings");
+    document.getElementById("cfg-minDiscountPercent").value = s.minDiscountPercent;
+    document.getElementById("cfg-minRating").value = s.minRating;
+    document.getElementById("cfg-maxOffersPerRound").value = s.maxOffersPerRound;
+    document.getElementById("cfg-maxOffersPerDay").value = s.maxOffersPerDay;
+    document.getElementById("cfg-intervalBetweenRoundsMinutes").value = s.intervalBetweenRoundsMinutes;
+  }
+
+  async function saveSettings() {
+    const msg = document.getElementById("settings-msg");
+    msg.textContent = "";
+    try {
+      await api("/api/settings", { method: "PUT", body: JSON.stringify({
+        minDiscountPercent: Number(document.getElementById("cfg-minDiscountPercent").value),
+        minRating: Number(document.getElementById("cfg-minRating").value),
+        maxOffersPerRound: Number(document.getElementById("cfg-maxOffersPerRound").value),
+        maxOffersPerDay: Number(document.getElementById("cfg-maxOffersPerDay").value),
+        intervalBetweenRoundsMinutes: Number(document.getElementById("cfg-intervalBetweenRoundsMinutes").value),
+      })});
+      msg.textContent = "Configurações salvas.";
+      msg.className = "msg success";
+    } catch (e) {
+      msg.textContent = e.message;
+      msg.className = "msg error";
+    }
+  }
+
+  async function runNow() {
+    const msg = document.getElementById("action-msg");
+    msg.textContent = "Executando...";
+    msg.className = "msg";
+    try {
+      const result = await api("/api/run-now", { method: "POST" });
+      msg.textContent = `Concluído: ${result.dealsSelected} selecionadas, ${result.productsFiltered} rejeitadas, ${result.errorsCount} erros.`;
+      msg.className = "msg success";
+      refreshAll();
+    } catch (e) {
+      msg.textContent = e.message;
+      msg.className = "msg error";
+    }
+  }
+
+  async function killSwitch(action) {
+    const msg = document.getElementById("action-msg");
+    try {
+      await api("/api/kill-switch", { method: "POST", body: JSON.stringify({ action }) });
+      msg.textContent = "Atualizado.";
+      msg.className = "msg success";
+      refreshAll();
+    } catch (e) {
+      msg.textContent = e.message;
+      msg.className = "msg error";
+    }
+  }
+
+  // Tenta carregar o dashboard direto; se der 401, mostra tela de login.
+  api("/api/dashboard").then(showApp).catch(() => showLogin());
+</script>
+</body>
+</html>
