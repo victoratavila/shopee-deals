@@ -290,7 +290,15 @@ export async function buildWebServer(deps: WebServerDeps): Promise<FastifyInstan
   // Nunca vazar stack trace para o usuário (seção 17).
   app.setErrorHandler((error, request, reply) => {
     request.log.error(error);
-    reply.code(500).send({ error: "Erro interno do servidor" });
+    const statusCode = error.statusCode ?? 500;
+    // Erros 4xx (requisição malformada, payload vazio, etc.) são problemas
+    // do lado do cliente - mostramos uma mensagem curta e sem stack trace,
+    // mas preservamos o código, para não parecerem falhas do servidor.
+    // Erros 5xx nunca vazam detalhes internos (seção 17).
+    if (statusCode >= 400 && statusCode < 500) {
+      return reply.code(statusCode).send({ error: error.message || "Requisição inválida" });
+    }
+    return reply.code(500).send({ error: "Erro interno do servidor" });
   });
 
   return app;

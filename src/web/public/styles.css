@@ -1,0 +1,96 @@
+:root {
+    --bg: #14161a;
+    --panel: #1c1f26;
+    --panel-alt: #22262f;
+    --text: #e9ebf0;
+    --text-dim: #9aa1ad;
+    --accent: #ff7a45;
+    --accent-dim: #a6461f;
+    --ok: #4fae7a;
+    --warn: #e0b23d;
+    --danger: #e0524d;
+    --border: #2b2f39;
+    --radius: 10px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-size: 15px;
+    line-height: 1.45;
+  }
+  header {
+    padding: 20px 16px 8px;
+  }
+  header h1 {
+    font-size: 20px;
+    margin: 0 0 2px;
+    letter-spacing: -0.01em;
+  }
+  header p { margin: 0; color: var(--text-dim); font-size: 13px; }
+  main { padding: 12px 16px 80px; max-width: 720px; margin: 0 auto; }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+    margin-bottom: 12px;
+  }
+  .card h2 { font-size: 14px; margin: 0 0 10px; color: var(--text-dim); font-weight: 600; }
+  .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .stat { background: var(--panel-alt); border-radius: 8px; padding: 10px 12px; }
+  .stat .value { font-size: 22px; font-weight: 700; }
+  .stat .label { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
+  .pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+  .pill.ok { background: rgba(79,174,122,0.15); color: var(--ok); }
+  .pill.warn { background: rgba(224,178,61,0.15); color: var(--warn); }
+  .pill.danger { background: rgba(224,82,77,0.15); color: var(--danger); }
+  button {
+    font: inherit;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 14px;
+    cursor: pointer;
+    font-weight: 600;
+  }
+  .btn-primary { background: var(--accent); color: #1a0e08; }
+  .btn-primary:active { background: var(--accent-dim); }
+  .btn-secondary { background: var(--panel-alt); color: var(--text); border: 1px solid var(--border); }
+  .btn-danger { background: rgba(224,82,77,0.15); color: var(--danger); }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; }
+  input, select {
+    width: 100%;
+    background: var(--panel-alt);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 9px 10px;
+    border-radius: 8px;
+    font: inherit;
+    margin-top: 4px;
+  }
+  label { display: block; font-size: 12px; color: var(--text-dim); margin-top: 10px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--border); }
+  th { color: var(--text-dim); font-weight: 600; }
+  #login-screen { max-width: 320px; margin: 60px auto; padding: 0 16px; }
+  #app { display: none; }
+  .msg { font-size: 13px; margin-top: 8px; }
+  .msg.error { color: var(--danger); }
+  .msg.success { color: var(--ok); }
+  a { color: var(--accent); }
+  .offer-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+  .offer-row:last-child { border-bottom: none; }
+  .offer-name { font-size: 13px; }
+  .offer-reason { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+  .btn-approve { background: rgba(79,174,122,0.15); color: var(--ok); font-size: 12px; padding: 6px 10px; white-space: nowrap; }
+  .empty-hint { font-size: 13px; color: var(--text-dim); }
+
+/* Utilitários de espaçamento (substituem atributos style inline, que a
+   Content Security Policy do Helmet bloqueia). */
+.mt-12 { margin-top: 12px; }
+.mt-14 { margin-top: 14px; }
+.login-title { margin-bottom: 4px; }
+.login-subtitle { color: var(--text-dim); margin-top: 0; }
+.status-details { margin-top: 10px; font-size: 13px; color: var(--text-dim); }
