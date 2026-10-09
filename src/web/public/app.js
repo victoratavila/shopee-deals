@@ -60,13 +60,30 @@ function modeHint(mode) {
 }
 
 function showLogin() {
+  if (schedulerEvents) {
+    schedulerEvents.close();
+    schedulerEvents = null;
+  }
   document.getElementById("login-screen").style.display = "block";
   document.getElementById("app").style.display = "none";
 }
-function showApp() {
+let schedulerEvents = null;
+function showApp(initialDashboard = null) {
   document.getElementById("login-screen").style.display = "none";
   document.getElementById("app").style.display = "block";
-  refreshAll();
+  startSchedulerEvents();
+  refreshAll(initialDashboard);
+}
+
+function startSchedulerEvents() {
+  if (schedulerEvents) return;
+  schedulerEvents = new EventSource("/api/scheduler/events");
+  schedulerEvents.addEventListener("run-finished", () => {
+    loadDashboard().catch(() => {
+      document.getElementById("stat-active-text").textContent =
+        "Não foi possível atualizar o status da última execução.";
+    });
+  });
 }
 
 async function login() {
@@ -108,32 +125,107 @@ function switchOffersTab(tab) {
   }
 }
 
-async function refreshAll() {
+async function refreshAll(initialDashboard = null) {
   await loadSettings();
   await Promise.all([
-    loadDashboard(),
+    loadDashboard(initialDashboard),
     loadRuns(),
     loadRejected(),
     loadDeals(),
   ]);
 }
 
+async function refreshOfferData() {
+  await Promise.all([loadRuns(), loadRejected(), loadDeals()]);
+}
+
 // Guarda o estado atual da automação pra saber que ação o botão único deve
 // disparar (pausar ou retomar) - nunca mostramos os dois ao mesmo tempo.
 let currentAutomationEnabled = false;
+let automationCountdownTarget = null;
+let schedulerRefreshInProgress = false;
 
-async function loadDashboard() {
-  const d = await api("/api/dashboard");
+function updateAutomationCountdown() {
+  const element = document.getElementById("automation-countdown");
+  if (!element || element.hidden || automationCountdownTarget === null) return;
+
+  const remainingSeconds = Math.ceil(
+    (automationCountdownTarget - Date.now()) / 1000,
+  );
+  if (remainingSeconds <= 0) {
+    element.textContent =
+      "Execução prevista agora; aguardando o próximo ciclo do scheduler.";
+    return;
+  }
+
+  const days = Math.floor(remainingSeconds / 86_400);
+  const hours = Math.floor((remainingSeconds % 86_400) / 3_600);
+  const minutes = Math.floor((remainingSeconds % 3_600) / 60);
+  const seconds = remainingSeconds % 60;
+  const timer = [hours, minutes, seconds]
+    .map((value) => String(value).padStart(2, "0"))
+    .join(":");
+  element.textContent =
+    days > 0
+      ? `Próxima execução automática em ${days}d ${timer}`
+      : `Próxima execução automática em ${timer}`;
+}
+
+async function loadDashboard(dashboardData = null) {
+  const d = dashboardData ?? (await api("/api/dashboard"));
+  const finishedSchedulerRun = d.latestFinishedSchedulerRun;
+  if (
+    finishedSchedulerRun &&
+    d.schedulerRefreshRunId !== finishedSchedulerRun.id &&
+    !schedulerRefreshInProgress
+  ) {
+    schedulerRefreshInProgress = true;
+    try {
+      document.getElementById("stat-active-text").textContent =
+        "Atualizando ofertas da última execução automática";
+      await refreshOfferData();
+      await api("/api/scheduler/refresh-complete", {
+        method: "POST",
+        body: JSON.stringify({ runId: finishedSchedulerRun.id }),
+      });
+      await loadDashboard();
+    } finally {
+      schedulerRefreshInProgress = false;
+    }
+    return;
+  }
+
   document.getElementById("stat-mode").textContent = modeLabel(d.effectiveMode);
   document
     .getElementById("stat-mode-info")
     .setAttribute("data-tooltip", modeHint(d.effectiveMode));
 
   const dot = document.getElementById("stat-active-dot");
-  dot.className = "dot " + (d.hasActiveRun ? "on" : "off");
-  document.getElementById("stat-active-text").textContent = d.hasActiveRun
-    ? "Rodando agora"
-    : "Parado";
+  const sched = d.schedulerStatus;
+  let statusText;
+  let statusDot = "off";
+  if (d.hasActiveRun) {
+    statusText = "Execução em andamento";
+    statusDot = "on";
+  } else if (!d.automationEnabled) {
+    statusText = "Automação pausada";
+  } else if (sched.reason.includes("Limite diário")) {
+    statusText = "Execução pausada: limite diário atingido";
+  } else if (sched.reason.includes("Fora do horário")) {
+    statusText = "Aguardando abertura da janela de funcionamento";
+    statusDot = "waiting";
+  } else if (sched.reason.includes("Intervalo mínimo")) {
+    statusText = "Aguardando o intervalo entre execuções";
+    statusDot = "waiting";
+  } else if (sched.nextRunAt) {
+    statusText = "Aguardando próxima execução automática";
+    statusDot = "waiting";
+  } else {
+    statusText = `Automação ativa: ${sched.reason}`;
+    statusDot = "waiting";
+  }
+  dot.className = `dot ${statusDot}`;
+  document.getElementById("stat-active-text").textContent = statusText;
 
   currentAutomationEnabled = d.automationEnabled;
   const toggleBtn = document.getElementById("btn-toggle-automation");
@@ -143,26 +235,44 @@ async function loadDashboard() {
   toggleBtn.className = d.automationEnabled
     ? "btn-secondary"
     : "btn-primary-outline";
+  const countdown = document.getElementById("automation-countdown");
+  const schedulerStatus = d.schedulerStatus;
+  if (!d.automationEnabled) {
+    automationCountdownTarget = null;
+    countdown.hidden = true;
+  } else if (d.hasActiveRun) {
+    automationCountdownTarget = null;
+    countdown.textContent = "A automação já está executando uma rodada.";
+    countdown.hidden = false;
+  } else if (schedulerStatus.nextRunAt) {
+    automationCountdownTarget = new Date(schedulerStatus.nextRunAt).getTime();
+    countdown.hidden = false;
+    updateAutomationCountdown();
+  } else {
+    automationCountdownTarget = null;
+    countdown.textContent = `Automação ativa, mas sem previsão de execução: ${schedulerStatus.reason}.`;
+    countdown.hidden = false;
+  }
 
   // Nunca mostra esse botão em Produção - o backend também recusa a ação
   // nesse modo, isso aqui é só pra nem oferecer a opção.
   document.getElementById("btn-wipe-offers").hidden =
     d.effectiveMode === "PRODUCTION";
 
-  document.getElementById("stat-hours").textContent =
-    `${d.operatingHours.start}h às ${d.operatingHours.end}h`;
+  document.getElementById("stat-hours").textContent = d.operatingHours.enabled
+    ? `${d.operatingHours.start} às ${d.operatingHours.end} (${d.operatingHours.timeZone})`
+    : "Desativada (somente intervalo)";
 
-  const sched = d.schedulerStatus;
   const schedEl = document.getElementById("stat-scheduler-status");
   if (!sched) {
     schedEl.textContent = "—";
   } else if (sched.willRunOnNextTick) {
-    schedEl.textContent = "no próximo minuto \u2713";
+    schedEl.textContent = "próximo ciclo (em até 1 s)";
   } else {
-    const eta = sched.nextEligibleAt
-      ? ` (\u00e0s ${new Date(sched.nextEligibleAt).toLocaleTimeString("pt-BR")})`
+    const eta = sched.nextRunAt
+      ? ` (prevista para ${new Date(sched.nextRunAt).toLocaleTimeString("pt-BR")})`
       : "";
-    schedEl.textContent = `bloqueada: ${sched.reason}${eta}`;
+    schedEl.textContent = `${statusText}${eta}`;
   }
 
   document.getElementById("stat-last").textContent = d.lastFinishedAt
@@ -215,6 +325,97 @@ function showListLoading(container) {
 
 function money(value) {
   return value != null ? `R$ ${Number(value).toFixed(2)}` : "";
+}
+
+function formatReasonNumber(value) {
+  const number = Number(String(value).replace(",", "."));
+  return Number.isFinite(number)
+    ? new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 2 }).format(
+        number,
+      )
+    : null;
+}
+
+function formatRejectionReason(reason, details) {
+  const detail = typeof details === "string" ? details : "";
+  const labels = {
+    DISCOUNT_BELOW_MINIMUM: "Desconto abaixo do mínimo",
+    RATING_BELOW_MINIMUM: "Avaliação abaixo do mínimo",
+    REVIEWS_BELOW_MINIMUM: "Poucas avaliações",
+    SALES_BELOW_MINIMUM: "Poucas vendas",
+    COMMISSION_BELOW_MINIMUM: "Comissão abaixo do mínimo",
+    PRICE_OUT_OF_RANGE: "Preço fora do intervalo permitido",
+    CATEGORY_BLOCKED: "Categoria bloqueada",
+    CATEGORY_NOT_ALLOWED: "Categoria não permitida",
+    RECENTLY_PUBLISHED: "Produto publicado recentemente",
+    SUSPICIOUS_PRICE: "Preço ou desconto suspeito",
+    DUPLICATE: "Produto duplicado nesta rodada",
+    INVALID_DATA: "Dados do produto inválidos",
+    DAILY_LIMIT_REACHED: "Limite diário de ofertas atingido",
+    ROUND_LIMIT_REACHED: "Limite de ofertas aprovadas na rodada atingido",
+    MANUALLY_REJECTED: "Rejeitada manualmente",
+  };
+  const valueWithMinimum = (pattern, unit = "") => {
+    const match = detail.match(pattern);
+    if (!match) return "";
+    const actual = formatReasonNumber(match[1]);
+    const minimum = formatReasonNumber(match[2]);
+    return actual !== null && minimum !== null
+      ? ` (${actual}${unit}; mínimo ${minimum}${unit})`
+      : "";
+  };
+
+  switch (reason) {
+    case "DISCOUNT_BELOW_MINIMUM":
+      return `${labels[reason]}${valueWithMinimum(/Desconto\s+([\d.,]+)%\s*<\s*mínimo\s+([\d.,]+)%/i, "%")}`;
+    case "RATING_BELOW_MINIMUM":
+      return `${labels[reason]}${valueWithMinimum(/Avaliação\s+([\d.,]+)\s*<\s*mínimo\s+([\d.,]+)/i)}`;
+    case "REVIEWS_BELOW_MINIMUM":
+      return `${labels[reason]}${valueWithMinimum(/([\d.,]+)\s+avaliações\s*<\s*mínimo\s+([\d.,]+)/i)}`;
+    case "SALES_BELOW_MINIMUM":
+      return `${labels[reason]}${valueWithMinimum(/([\d.,]+)\s+vendas\s*<\s*mínimo\s+([\d.,]+)/i)}`;
+    case "COMMISSION_BELOW_MINIMUM":
+      return `${labels[reason]}${valueWithMinimum(/Comissão\s+([\d.,]+)%\s*<\s*mínimo\s+([\d.,]+)%/i, "%")}`;
+    case "PRICE_OUT_OF_RANGE": {
+      const match = detail.match(
+        /Preço\s+([\d.,]+)\s+(abaixo do mínimo|acima do máximo)\s+([\d.,]+)/i,
+      );
+      if (!match) return labels[reason];
+      const actual = formatReasonNumber(match[1]);
+      const bound = formatReasonNumber(match[3]);
+      if (actual === null || bound === null) return labels[reason];
+      return match[2].toLowerCase() === "abaixo do mínimo"
+        ? `Preço abaixo do mínimo (R$ ${actual}; mínimo R$ ${bound})`
+        : `Preço acima do máximo (R$ ${actual}; máximo R$ ${bound})`;
+    }
+    case "CATEGORY_BLOCKED":
+    case "CATEGORY_NOT_ALLOWED": {
+      const category = detail.match(/Categoria\s+"([^"]+)"/i)?.[1];
+      return category ? `${labels[reason]}: ${category}` : labels[reason];
+    }
+    case "RECENTLY_PUBLISHED": {
+      const days = detail.match(/menos de\s+(\d+)\s+dia/i)?.[1];
+      return days
+        ? `${labels[reason]} (aguardar ${days} dia${days === "1" ? "" : "s"})`
+        : labels[reason];
+    }
+    case "SUSPICIOUS_PRICE":
+      return detail ? `${labels[reason]}: ${detail}` : labels[reason];
+    case "INVALID_DATA":
+      return detail.toLowerCase().includes("numér")
+        ? "Dados numéricos do produto inválidos"
+        : labels[reason];
+    case "ROUND_LIMIT_REACHED": {
+      const limit = detail.match(/Limite de\s+(\d+)/i)?.[1];
+      return limit ? `${labels[reason]} (${limit})` : labels[reason];
+    }
+    case "MANUALLY_REJECTED":
+      return labels[reason];
+    default:
+      return (
+        labels[reason] || String(reason).replaceAll("_", " ").toLowerCase()
+      );
+  }
 }
 
 function categoryHue(categoryId) {
@@ -324,7 +525,7 @@ async function loadRejected() {
   container.innerHTML = "";
   if (rows.length === 0) {
     container.innerHTML =
-      '<p class="empty-hint">Nenhuma rejeição neste período. \u2728</p>';
+      '<p class="empty-hint" style="text-align: center">Nenhuma rejeição neste período. \u2728</p>';
     return;
   }
 
@@ -339,7 +540,7 @@ async function loadRejected() {
       const meta = [
         money(r.currentPrice),
         r.discountPercent ? `-${r.discountPercent}%` : null,
-        r.reason,
+        escapeHTML(formatRejectionReason(r.reason, r.details)),
       ]
         .filter(Boolean)
         .join(" \u00b7 ");
@@ -569,8 +770,10 @@ async function openDetailModal(kind, id) {
       html += modalRow("Aprovado por", data.approvedBy);
     } else {
       html += '<div class="modal-section-title">Rejeição</div>';
-      html += modalRow("Motivo", data.reason);
-      html += modalRow("Detalhes", data.details);
+      html += modalRow(
+        "Motivo",
+        escapeHTML(formatRejectionReason(data.reason, data.details)),
+      );
       html += modalRow("Rejeitado em", formatDateTimeBR(data.createdAt));
       html += modalRow(
         "Aprovado manualmente em",
@@ -614,7 +817,10 @@ async function openDetailModal(kind, id) {
     if (imageUrl) {
       try {
         const parsedImageUrl = new URL(imageUrl);
-        if (parsedImageUrl.protocol === "https:" || parsedImageUrl.protocol === "http:") {
+        if (
+          parsedImageUrl.protocol === "https:" ||
+          parsedImageUrl.protocol === "http:"
+        ) {
           image.src = parsedImageUrl.href;
           content.prepend(image);
         } else {
@@ -726,12 +932,12 @@ const SETTINGS_FIELDS = [
     hint: 'Quantidade máxima de ofertas aprovadas no dia inteiro, somando todas as execuções. Ao atingir esse número, NENHUMA nova execução roda (nem automática, nem manual) até o dia virar ou você aumentar o limite. "Sem limite" remove esse teto diário.',
   },
   {
-    key: "minDaysBeforeRepublish",
-    label: "Dias antes de republicar",
+    key: "republishIntervalMinutes",
+    label: "Minutos para republicar",
     step: "1",
     nullable: true,
     group: "volume",
-    hint: 'Quantos dias o sistema espera antes de aprovar o mesmo produto de novo, mesmo que ele volte a aparecer nas buscas. Evita repetir a mesma oferta com frequência. Unidade: dias. "Sem limite" permite aprovar o mesmo produto em execuções seguidas, sem esperar.',
+    hint: 'Quantos minutos o sistema espera antes de aprovar/publicar o mesmo produto de novo. "Sem limite" permite republicar sem aguardar esse intervalo.',
   },
   {
     key: "intervalBetweenRoundsMinutes",
@@ -740,6 +946,19 @@ const SETTINGS_FIELDS = [
     nullable: false,
     group: "schedule",
     hint: 'Intervalo mínimo entre uma execução automática do scheduler e a próxima. Não afeta cliques manuais em "Executar agora", que sempre rodam na hora. Unidade: minutos.',
+  },
+  {
+    key: "reprocessIntervalMinutes",
+    label: "Intervalo para reprocessar produtos já identificados",
+    step: "1",
+    nullable: false,
+    group: "schedule",
+    unitOptions: [
+      { value: "minutes", label: "minutos", minutes: 1 },
+      { value: "hours", label: "horas", minutes: 60 },
+      { value: "days", label: "dias", minutes: 1_440 },
+    ],
+    hint: "Tempo mínimo desde a última avaliação efetiva antes que o produto possa ser avaliado novamente. Produtos aprovados e rejeitados são identificados pelo ID da Shopee. O padrão é 24 horas.",
   },
 ];
 
@@ -761,16 +980,42 @@ function renderSettingsFields() {
     const tooltip = f.hint
       ? `<span class="info-icon" data-tooltip="${f.hint.replace(/"/g, "&quot;")}" tabindex="0">?</span>`
       : "";
+    const unitSelect = f.unitOptions
+      ? `<select class="setting-unit" id="cfg-unit-${f.key}" aria-label="Unidade de ${f.label}">${f.unitOptions
+          .map((unit) => `<option value="${unit.value}">${unit.label}</option>`)
+          .join("")}</select>`
+      : "";
     const fieldHtml = `
       <label>${f.label}${tooltip}</label>
       <div class="setting-row">
-        <input class="setting-input" id="cfg-${f.key}" type="number" step="${f.step}" />
+        <input class="setting-input" id="cfg-${f.key}" type="number" step="${f.unitOptions ? "any" : f.step}" ${f.unitOptions ? 'min="0" required' : ""} />
+        ${unitSelect}
         ${toggle}
       </div>
     `;
     document
       .getElementById(SETTINGS_GROUP_CONTAINER_ID[f.group])
       .insertAdjacentHTML("beforeend", fieldHtml);
+    if (f.unitOptions) {
+      const input = document.getElementById(`cfg-${f.key}`);
+      const unitSelect = document.getElementById(`cfg-unit-${f.key}`);
+      unitSelect.addEventListener("change", () => {
+        const previousUnit = f.unitOptions.find(
+          (unit) => unit.value === unitSelect.dataset.unit,
+        );
+        const nextUnit = f.unitOptions.find(
+          (unit) => unit.value === unitSelect.value,
+        );
+        const value = Number(input.value);
+        if (previousUnit && nextUnit && Number.isFinite(value)) {
+          input.value = String(
+            (value * previousUnit.minutes) / nextUnit.minutes,
+          );
+        }
+        unitSelect.dataset.unit = unitSelect.value;
+      });
+      unitSelect.dataset.unit = unitSelect.value;
+    }
   }
 
   for (const f of SETTINGS_FIELDS.filter((x) => x.nullable)) {
@@ -786,6 +1031,48 @@ function renderSettingsFields() {
           .classList.toggle("active", nowUnlimited);
       });
   }
+
+  populateTimeZoneOptions();
+  document
+    .getElementById("cfg-operatingHoursEnabled")
+    .addEventListener("click", (event) => {
+      setOperatingWindowEnabled(
+        event.currentTarget.getAttribute("aria-pressed") !== "true",
+      );
+    });
+}
+
+function setOperatingWindowEnabled(enabled) {
+  const button = document.getElementById("cfg-operatingHoursEnabled");
+  button.setAttribute("aria-pressed", String(enabled));
+  button.textContent = enabled
+    ? "Desativar janela de funcionamento"
+    : "Ativar janela de funcionamento";
+  document.getElementById("schedule-window-fields").hidden = !enabled;
+}
+
+function populateTimeZoneOptions(selectedTimeZone = "America/Sao_Paulo") {
+  const select = document.getElementById("cfg-automationTimeZone");
+  const timeZones =
+    typeof Intl.supportedValuesOf === "function"
+      ? Intl.supportedValuesOf("timeZone")
+      : [
+          "America/Sao_Paulo",
+          "America/New_York",
+          "Europe/London",
+          "Europe/Lisbon",
+          "Asia/Tokyo",
+          "UTC",
+        ];
+  const options = [...new Set(["UTC", ...timeZones, selectedTimeZone])].sort();
+  select.replaceChildren();
+  for (const timeZone of options) {
+    const option = document.createElement("option");
+    option.value = timeZone;
+    option.textContent = timeZone;
+    select.appendChild(option);
+  }
+  select.value = selectedTimeZone;
 }
 
 // Estado local das categorias (evita ir ao servidor a cada edição pequena;
@@ -796,7 +1083,17 @@ async function loadSettings() {
   const s = await api("/api/settings");
   for (const f of SETTINGS_FIELDS) {
     const input = document.getElementById(`cfg-${f.key}`);
-    const value = s[f.key];
+    let value = s[f.key];
+    if (f.unitOptions) {
+      const preferredUnit = [...f.unitOptions]
+        .sort((a, b) => b.minutes - a.minutes)
+        .find((unit) => value % unit.minutes === 0);
+      const selectedUnit = preferredUnit ?? f.unitOptions[0];
+      document.getElementById(`cfg-unit-${f.key}`).value = selectedUnit.value;
+      document.getElementById(`cfg-unit-${f.key}`).dataset.unit =
+        selectedUnit.value;
+      value = value / selectedUnit.minutes;
+    }
     const toggleBtn = document.querySelector(`[data-toggle-limit="${f.key}"]`);
     if (f.nullable && value === null) {
       input.value = "";
@@ -810,6 +1107,13 @@ async function loadSettings() {
       if (toggleBtn) toggleBtn.classList.remove("active");
     }
   }
+  setOperatingWindowEnabled(s.operatingHoursEnabled);
+  document.getElementById("cfg-automationStartTime").value =
+    s.automationStartTime;
+  document.getElementById("cfg-automationEndTime").value = s.automationEndTime;
+  populateTimeZoneOptions(s.automationTimeZone);
+  document.getElementById("schedule-window-fields").hidden =
+    !s.operatingHoursEnabled;
   document.getElementById("cfg-searchMode").value =
     s.searchMode || "ALL_PRODUCTS";
   updateSearchLimitScope(s.searchLimitScope || "ROUND");
@@ -820,16 +1124,59 @@ async function loadSettings() {
 
 async function saveSettings() {
   const payload = {};
+  const startTime = document
+    .getElementById("cfg-automationStartTime")
+    .value.trim();
+  const endTime = document.getElementById("cfg-automationEndTime").value.trim();
+  const timePattern = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
+  if (!timePattern.test(startTime) || !timePattern.test(endTime)) {
+    showToast(
+      "Informe os horários no formato HH:MM, entre 00:00 e 23:59.",
+      "error",
+    );
+    return;
+  }
   for (const f of SETTINGS_FIELDS) {
     const input = document.getElementById(`cfg-${f.key}`);
-    payload[f.key] =
+    let value =
       f.nullable && input.dataset.unlimited === "true"
         ? null
         : Number(input.value);
+    if (f.unitOptions) {
+      const unit = f.unitOptions.find(
+        (option) =>
+          option.value === document.getElementById(`cfg-unit-${f.key}`).value,
+      );
+      if (
+        !unit ||
+        input.value.trim() === "" ||
+        !Number.isFinite(value) ||
+        value < 0 ||
+        !Number.isInteger(value * unit.minutes)
+      ) {
+        showToast(
+          "Informe um intervalo válido para reprocessar produtos.",
+          "error",
+        );
+        return;
+      }
+      value *= unit.minutes;
+    }
+    payload[f.key] = value;
   }
+  payload.operatingHoursEnabled =
+    document
+      .getElementById("cfg-operatingHoursEnabled")
+      .getAttribute("aria-pressed") === "true";
+  payload.automationStartTime = startTime;
+  payload.automationEndTime = endTime;
+  payload.automationTimeZone = document.getElementById(
+    "cfg-automationTimeZone",
+  ).value;
   payload.searchMode = document.getElementById("cfg-searchMode").value;
   payload.searchLimitScope =
-    document.querySelector("[data-search-limit-scope].active")?.dataset.searchLimitScope || "ROUND";
+    document.querySelector("[data-search-limit-scope].active")?.dataset
+      .searchLimitScope || "ROUND";
   payload.keywordCategories = localCategories;
   try {
     await api("/api/settings", {
@@ -846,7 +1193,9 @@ async function saveSettings() {
 
 function renderSearchPreview() {
   const mode = document.getElementById("cfg-searchMode").value;
-  const scope = document.querySelector("[data-search-limit-scope].active")?.dataset.searchLimitScope || "ROUND";
+  const scope =
+    document.querySelector("[data-search-limit-scope].active")?.dataset
+      .searchLimitScope || "ROUND";
   const limitInput = document.getElementById("cfg-maxOffersFetchedPerRound");
   const limit =
     limitInput?.dataset.unlimited === "true"
@@ -858,44 +1207,57 @@ function renderSearchPreview() {
   const categoriesPanel = document.getElementById("categories-panel");
   const el = document.getElementById("search-preview");
   for (const button of document.querySelectorAll("[data-search-limit-scope]")) {
-    button.disabled = mode !== "CATEGORIES" && button.dataset.searchLimitScope === "CATEGORY";
+    button.disabled =
+      mode !== "CATEGORIES" && button.dataset.searchLimitScope === "CATEGORY";
   }
   categoriesPanel.hidden = mode !== "CATEGORIES";
   const selected = localCategories.filter((category) => category.selected);
   const hasCategoryKeywords = selected.some((category) =>
     category.keywords.some((keyword) => keyword.trim()),
   );
-  const usesCategoryLimit = mode === "CATEGORIES" && scope === "CATEGORY" && hasCategoryKeywords;
-  hint.textContent =
-    Number.isNaN(limit)
-      ? 'Informe um limite válido ou selecione "Sem limite".'
-      : limit === null
-        ? usesCategoryLimit
-          ? "Sem limite de ofertas buscadas por categoria."
-          : "Sem limite de ofertas buscadas na rodada."
-        : usesCategoryLimit
-          ? `Até ${limit} itens serão buscados por categoria selecionada. Se ela tiver várias palavras-chave, o limite será dividido entre elas.`
-          : `Até ${limit} itens serão buscados no total da rodada.`;
+  const usesCategoryLimit =
+    mode === "CATEGORIES" && scope === "CATEGORY" && hasCategoryKeywords;
+  hint.textContent = Number.isNaN(limit)
+    ? 'Informe um limite válido ou selecione "Sem limite".'
+    : limit === null
+      ? usesCategoryLimit
+        ? "Sem limite de ofertas buscadas por categoria."
+        : "Sem limite de ofertas buscadas na rodada."
+      : usesCategoryLimit
+        ? `Até ${limit} itens serão buscados por categoria selecionada. Se ela tiver várias palavras-chave, o limite será dividido entre elas.`
+        : `Até ${limit} itens serão buscados no total da rodada.`;
   if (mode !== "CATEGORIES") {
     el.hidden = true;
     return;
   }
   el.hidden = false;
-  if (selected.length === 0 || selected.every((category) => !category.keywords.some((keyword) => keyword.trim()))) {
-    el.innerHTML = "<strong>Nenhuma palavra-chave selecionada.</strong> A busca será feita em todos os produtos.";
+  if (
+    selected.length === 0 ||
+    selected.every(
+      (category) => !category.keywords.some((keyword) => keyword.trim()),
+    )
+  ) {
+    el.innerHTML =
+      "<strong>Nenhuma palavra-chave selecionada.</strong> A busca será feita em todos os produtos.";
     return;
   }
-  el.innerHTML = `<strong>Busca por categoria</strong>${selected.map((category) => {
-    const keywords = [...new Map(
-      category.keywords
-        .map((keyword) => keyword.trim())
-        .filter(Boolean)
-        .map((keyword) => [keyword.toLowerCase(), keyword]),
-    ).values()];
-    return `<div class="search-preview-category"><b>${escapeHTML(category.name || "Categoria sem nome")}</b>: ${
-      keywords.length ? keywords.map(escapeHTML).join(", ") : "sem palavras-chave"
-    }${keywords.length > 0 && scope === "CATEGORY" && limit !== null && Number.isFinite(limit) ? ` <span>(até ${limit} itens)</span>` : ""}</div>`;
-  }).join("")}`;
+  el.innerHTML = `<strong>Busca por categoria</strong>${selected
+    .map((category) => {
+      const keywords = [
+        ...new Map(
+          category.keywords
+            .map((keyword) => keyword.trim())
+            .filter(Boolean)
+            .map((keyword) => [keyword.toLowerCase(), keyword]),
+        ).values(),
+      ];
+      return `<div class="search-preview-category"><b>${escapeHTML(category.name || "Categoria sem nome")}</b>: ${
+        keywords.length
+          ? keywords.map(escapeHTML).join(", ")
+          : "sem palavras-chave"
+      }${keywords.length > 0 && scope === "CATEGORY" && limit !== null && Number.isFinite(limit) ? ` <span>(até ${limit} itens)</span>` : ""}</div>`;
+    })
+    .join("")}`;
 }
 
 function updateSearchLimitScope(scope) {
@@ -1025,17 +1387,24 @@ document
   .addEventListener("change", renderSearchPreview);
 
 for (const button of document.querySelectorAll("[data-search-limit-scope]")) {
-  button.addEventListener("click", () => updateSearchLimitScope(button.dataset.searchLimitScope));
+  button.addEventListener("click", () =>
+    updateSearchLimitScope(button.dataset.searchLimitScope),
+  );
 }
 
-document.getElementById("settings-fields-volume").addEventListener("input", (event) => {
-  if (event.target.id === "cfg-maxOffersFetchedPerRound") renderSearchPreview();
-});
-document.getElementById("settings-fields-volume").addEventListener("click", (event) => {
-  if (event.target.dataset.toggleLimit === "maxOffersFetchedPerRound") {
-    renderSearchPreview();
-  }
-});
+document
+  .getElementById("settings-fields-volume")
+  .addEventListener("input", (event) => {
+    if (event.target.id === "cfg-maxOffersFetchedPerRound")
+      renderSearchPreview();
+  });
+document
+  .getElementById("settings-fields-volume")
+  .addEventListener("click", (event) => {
+    if (event.target.dataset.toggleLimit === "maxOffersFetchedPerRound") {
+      renderSearchPreview();
+    }
+  });
 
 document.getElementById("btn-add-category").addEventListener("click", () => {
   const id = "cat-" + Date.now();
@@ -1098,7 +1467,12 @@ document.getElementById("categories-list").addEventListener("click", (e) => {
     const kw = input.value.trim();
     if (!kw) return;
     const cat = localCategories.find((c) => c.id === kwAddCatId);
-    if (cat && !cat.keywords.some((keyword) => keyword.trim().toLowerCase() === kw.toLowerCase())) {
+    if (
+      cat &&
+      !cat.keywords.some(
+        (keyword) => keyword.trim().toLowerCase() === kw.toLowerCase(),
+      )
+    ) {
       cat.keywords.push(kw);
       input.value = "";
       renderCategories();
@@ -1128,7 +1502,12 @@ document.getElementById("categories-list").addEventListener("keydown", (e) => {
     const kw = e.target.value.trim();
     if (!kw) return;
     const cat = localCategories.find((c) => c.id === kwAddCatId);
-    if (cat && !cat.keywords.some((keyword) => keyword.trim().toLowerCase() === kw.toLowerCase())) {
+    if (
+      cat &&
+      !cat.keywords.some(
+        (keyword) => keyword.trim().toLowerCase() === kw.toLowerCase(),
+      )
+    ) {
       cat.keywords.push(kw);
       e.target.value = "";
       renderCategories();
@@ -1168,7 +1547,7 @@ async function toggleAutomation() {
       action === "pause" ? "Automação pausada." : "Automação retomada.",
       "success",
     );
-    loadDashboard();
+    await loadDashboard();
   } catch (e) {
     showToast(e.message, "error");
   }
@@ -1303,13 +1682,8 @@ for (const id of ["login-email", "login-password"]) {
 }
 
 api("/api/dashboard")
-  .then(showApp)
+  .then((dashboard) => showApp(dashboard))
   .catch(() => showLogin());
 
-// Atualiza o status (dashboard) sozinho, sem precisar recarregar a página -
-// útil pra observar em tempo real se/quando o scheduler dispara automaticamente.
-setInterval(() => {
-  if (document.getElementById("app").style.display !== "none") {
-    loadDashboard().catch(() => {});
-  }
-}, 15_000);
+// O contador é local; a conclusão automática chega por SSE, sem polling do dashboard.
+setInterval(updateAutomationCountdown, 1000);

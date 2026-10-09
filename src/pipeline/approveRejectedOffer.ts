@@ -31,9 +31,9 @@ export class MissingSnapshotError extends Error {
 }
 
 export class RecentlyPublishedError extends Error {
-  constructor(days: number) {
+  constructor(minutes: number) {
     super(
-      `Este produto já foi aprovado/publicado nos últimos ${days} dia(s) (a mesma regra "dias antes de republicar" que vale para a seleção automática). Se quiser publicar de novo mesmo assim, aguarde a janela passar ou ajuste essa configuração.`,
+      `Este produto já foi aprovado/publicado nos últimos ${minutes} minuto(s) (a mesma regra "minutos para republicar" que vale para a seleção automática). Se quiser publicar de novo mesmo assim, aguarde a janela passar ou ajuste essa configuração.`,
     );
     this.name = "RecentlyPublishedError";
   }
@@ -72,7 +72,7 @@ export interface ApproveRejectedOfferResult {
  * As regras que CONTINUAM valendo, porque protegem a integridade dos dados
  * e não o "julgamento de qualidade" da oferta em si:
  *  - publicação recente (mesmo produto não pode ser aprovado de novo dentro
- *    da janela de `minDaysBeforeRepublish` - também cobre o caso de o
+ *    da janela de `republishIntervalMinutes` - também cobre o caso de o
  *    produto já ter sido aprovado automaticamente depois desta rejeição);
  *  - limite diário de ofertas;
  *  - duplicidade (reivindicação atômica da rejeição - impede dois cliques
@@ -92,8 +92,8 @@ export async function approveRejectedOfferManually(
   const offer: RawShopeeOffer = JSON.parse(rejectedOffer.offerSnapshot);
   const settings = await repos.settings.getOperationalSettings();
   const republishCutoff =
-    settings.minDaysBeforeRepublish !== null
-      ? new Date(Date.now() - settings.minDaysBeforeRepublish * 24 * 60 * 60 * 1000)
+    settings.republishIntervalMinutes !== null
+      ? new Date(Date.now() - settings.republishIntervalMinutes * 60 * 1000)
       : null;
 
   // --- checagem "rápida" de publicação recente (mesma regra do pipeline
@@ -103,7 +103,7 @@ export async function approveRejectedOfferManually(
   // createIfNotRecentlyPublished (atômico no banco).
   if (republishCutoff !== null) {
     const recentlyPublished = await repos.publishedDeal.wasRecentlyPublished(offer.shopeeItemId, republishCutoff);
-    if (recentlyPublished) throw new RecentlyPublishedError(settings.minDaysBeforeRepublish!);
+    if (recentlyPublished) throw new RecentlyPublishedError(settings.republishIntervalMinutes!);
   }
 
   // --- limite diário (mesma checagem, mesma fonte de verdade que trava a
@@ -144,7 +144,7 @@ export async function approveRejectedOfferManually(
     });
 
     if (!created) {
-      throw new RecentlyPublishedError(settings.minDaysBeforeRepublish ?? 0);
+      throw new RecentlyPublishedError(settings.republishIntervalMinutes ?? 0);
     }
 
     return { productId: product.id, dealScore: score, affiliateLink };

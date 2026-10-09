@@ -29,6 +29,8 @@ export class ConcurrentRunError extends Error {
  */
 export interface ProductRepository {
   findByShopeeItemId(shopeeItemId: string): Promise<StoredProduct | null>;
+  /** Último processamento efetivo por item, considerando ofertas aprovadas e rejeitadas. */
+  findLastProcessedAtByShopeeItemIds(shopeeItemIds: string[]): Promise<Map<string, Date>>;
   upsert(offer: RawShopeeOffer, affiliateLink: string): Promise<StoredProduct>;
 }
 

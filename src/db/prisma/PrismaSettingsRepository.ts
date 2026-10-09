@@ -2,6 +2,7 @@ import type { PrismaClient } from "@prisma/client";
 import type { SettingsRepository } from "../repositories.js";
 import {
   OperationalSettingsSchema,
+  parseOperationalSettings,
   defaultOperationalSettings,
   SETTINGS_KEY,
   type OperationalSettings,
@@ -15,7 +16,7 @@ export class PrismaSettingsRepository implements SettingsRepository {
     if (!row) return defaultOperationalSettings();
 
     try {
-      return OperationalSettingsSchema.parse(JSON.parse(row.value));
+      return parseOperationalSettings(JSON.parse(row.value));
     } catch {
       // Configuração corrompida/inválida no banco -> preferimos os padrões
       // seguros a travar o sistema (seção 33: na dúvida, não publicar errado).

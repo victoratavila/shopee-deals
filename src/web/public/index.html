@@ -46,6 +46,7 @@
           <button class="btn-primary" id="btn-run-now">▶ Executar agora</button>
           <button class="btn-secondary" id="btn-toggle-automation">—</button>
         </div>
+        <p id="automation-countdown" class="automation-countdown" aria-live="polite" hidden></p>
 
         <!-- Só fica visível fora do modo Produção (controlado via JS após
              carregar o dashboard) - o backend também bloqueia essa ação em
@@ -139,7 +140,26 @@
         </details>
         <details class="settings-group">
           <summary>Agendamento</summary>
-          <div id="settings-fields-schedule" class="settings-group-body"></div>
+          <div class="settings-group-body">
+            <div id="settings-fields-schedule"></div>
+            <div class="schedule-window-controls">
+              <button id="cfg-operatingHoursEnabled" type="button" class="btn-secondary" aria-pressed="true"></button>
+              <p class="schedule-setting-hint">Desative para executar somente pelo intervalo configurado, sem restrição de horário.</p>
+              <div class="schedule-time-grid" id="schedule-window-fields">
+                <div>
+                  <label for="cfg-automationStartTime">Início (24 horas)</label>
+                  <input id="cfg-automationStartTime" type="text" inputmode="numeric" maxlength="5" pattern="(?:[01][0-9]|2[0-3]):[0-5][0-9]" placeholder="08:00" aria-describedby="schedule-time-format" />
+                </div>
+                <div>
+                  <label for="cfg-automationEndTime">Término (24 horas)</label>
+                  <input id="cfg-automationEndTime" type="text" inputmode="numeric" maxlength="5" pattern="(?:[01][0-9]|2[0-3]):[0-5][0-9]" placeholder="22:00" aria-describedby="schedule-time-format" />
+                </div>
+              </div>
+              <p id="schedule-time-format" class="schedule-setting-hint">Informe os horários no formato HH:MM (00:00 a 23:59).</p>
+              <label for="cfg-automationTimeZone">Fuso horário da janela</label>
+              <select id="cfg-automationTimeZone"></select>
+            </div>
+          </div>
         </details>
 
         <details class="settings-group" id="settings-group-search">

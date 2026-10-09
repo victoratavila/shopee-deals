@@ -118,9 +118,12 @@ export async function runPipeline(opts: RunPipelineOptions): Promise<PipelineRes
 
   // null = sem restrição de republicação (o produto pode ser publicado de novo a qualquer momento).
   const republishCutoff =
-    settings.minDaysBeforeRepublish !== null
-      ? new Date(Date.now() - settings.minDaysBeforeRepublish * 24 * 60 * 60 * 1000)
+    settings.republishIntervalMinutes !== null
+      ? new Date(Date.now() - settings.republishIntervalMinutes * 60 * 1000)
       : null;
+  const reprocessCutoff = new Date(
+    Date.now() - settings.reprocessIntervalMinutes * 60 * 1000,
+  );
 
   const seenInRound = new Set<string>();
   const accepted: AcceptedOfferSummary[] = [];
@@ -215,14 +218,28 @@ export async function runPipeline(opts: RunPipelineOptions): Promise<PipelineRes
         fetchedByGroup.set(groupId, fetchedInGroup + offersThisPage.length);
         productsFound += offersThisPage.length;
 
+        const offersToCheck: RawShopeeOffer[] = [];
         for (const offer of offersThisPage) {
+          if (seenInRound.has(offer.shopeeItemId)) continue;
+          offersToCheck.push(offer);
+        }
+        const lastProcessedAtByItemId =
+          await repos.product.findLastProcessedAtByShopeeItemIds(
+            offersToCheck.map((offer) => offer.shopeeItemId),
+          );
+        for (const offer of offersToCheck) {
+          seenInRound.add(offer.shopeeItemId);
+        }
+
+        for (const offer of offersToCheck) {
           try {
-            // --- duplicidade dentro da própria rodada ---
-            if (seenInRound.has(offer.shopeeItemId)) {
-              rejected.push(rejectWithSnapshot(offer, { accepted: false, reason: "DUPLICATE" }));
+            // A mesma oferta pode vir de várias páginas/keywords na rodada.
+            // Ela já foi contabilizada pela primeira ocorrência e não gera
+            // uma rejeição repetida.
+            const lastProcessedAt = lastProcessedAtByItemId.get(offer.shopeeItemId);
+            if (lastProcessedAt !== undefined && lastProcessedAt > reprocessCutoff) {
               continue;
             }
-            seenInRound.add(offer.shopeeItemId);
 
             const existingProduct = await repos.product.findByShopeeItemId(offer.shopeeItemId);
             const recentlyPublished =

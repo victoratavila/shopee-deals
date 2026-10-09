@@ -2,7 +2,7 @@ import type { RawShopeeOffer, RejectedOfferResult, RejectionReason } from "../ty
 import type { OperationalSettings } from "../config/operationalSettings.js";
 
 export interface OfferContext {
-  /** true se este produto já foi publicado dentro da janela de "minDaysBeforeRepublish" */
+  /** true se este produto já foi publicado dentro do intervalo de republicação configurado */
   recentlyPublished: boolean;
   /** true se já apareceu nesta mesma rodada (duplicidade dentro da execução) */
   isDuplicateInRound: boolean;
@@ -66,7 +66,7 @@ export function evaluateOffer(
     return {
       accepted: false,
       reason: "RECENTLY_PUBLISHED",
-      details: `Publicado há menos de ${settings.minDaysBeforeRepublish} dia(s)`,
+      details: `Publicado há menos de ${settings.republishIntervalMinutes} minuto(s)`,
     };
   }
 

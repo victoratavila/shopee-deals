@@ -70,8 +70,9 @@ main { padding: 12px 16px 80px; max-width: 720px; margin: 0 auto; }
   font-weight: 600;
 }
 .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--text-dim); display: inline-block; flex-shrink: 0; }
-.dot.on { background: var(--warn); }
-.dot.off { background: var(--ok); }
+.dot.on { background: var(--ok); }
+.dot.waiting { background: var(--warn); }
+.dot.off { background: var(--text-dim); }
 
 /* "Mais detalhes" - progressive disclosure: informação de diagnóstico não
    precisa competir com a ação principal, mas continua a um clique. */
@@ -448,6 +449,7 @@ a { color: var(--accent); }
 /* --- Linha de configuração com toggle "sem limite" --- */
 .setting-row { display: flex; align-items: flex-end; gap: 8px; }
 .setting-row .setting-input { flex: 1; }
+.setting-row .setting-unit { width: auto; min-width: 105px; }
 .setting-row label { margin-top: 10px; }
 
 /* Utilitários de espaçamento */
@@ -456,6 +458,16 @@ a { color: var(--accent); }
 .login-title { margin-bottom: 4px; }
 .login-subtitle { color: var(--text-dim); margin-top: 0; }
 .status-details { margin-top: 10px; font-size: 13px; color: var(--text-dim); }
+.automation-countdown {
+  margin: 10px 0 0;
+  color: var(--ok);
+  font-size: 13px;
+  font-weight: 600;
+}
+.schedule-window-controls { margin-top: 12px; }
+.schedule-time-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.schedule-time-grid[hidden] { display: none; }
+.schedule-setting-hint { color: var(--text-dim); font-size: 12px; margin: 4px 0 10px; }
 
 /* --- Busca por categorias/palavras-chave --- */
 .search-preview { background: var(--panel-alt); border-radius: 8px; padding: 10px 12px; font-size: 12px; margin-top: 10px; line-height: 1.6; }

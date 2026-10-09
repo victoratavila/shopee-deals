@@ -27,9 +27,16 @@ import {
   NotManuallyApprovedError,
   UseUndoInsteadError,
 } from "../pipeline/approveRejectedOffer.js";
-import { resolveEffectiveMode, schedulerTick, decideTick } from "../scheduler/scheduler.js";
+import {
+  resolveEffectiveMode,
+  schedulerTick,
+  decideTick,
+  getNextScheduledTickAt,
+  getLatestSchedulerAnchor,
+} from "../scheduler/scheduler.js";
 import { isDailyLimitReached } from "../pipeline/dailyLimit.js";
 import { startOfDaysAgo, clampPeriodDays } from "../utils/dateRange.js";
+import { schedulerRunEvents, type SchedulerRunFinishedEvent } from "../scheduler/runEvents.js";
 
 /** Forma esperada do JSON salvo em RejectedOffer.offerSnapshot - é o RawShopeeOffer serializado. */
 interface RawShopeeOfferLike {
@@ -73,6 +80,10 @@ const LoginSchema = z.object({
 
 const KillSwitchSchema = z.object({
   action: z.enum(["pause", "resume", "force_dry_run"]),
+});
+
+const SchedulerRefreshSchema = z.object({
+  runId: z.string().min(1),
 });
 
 export async function buildWebServer(deps: WebServerDeps): Promise<FastifyInstance> {
@@ -133,7 +144,7 @@ export async function buildWebServer(deps: WebServerDeps): Promise<FastifyInstan
   });
 
   // Endpoint pensado para hospedagens gratuitas que "dormem" quando ociosas
-  // (ex: Render free tier) e por isso não conseguem manter um node-cron
+  // (ex: Render free tier) e por isso não conseguem manter o scheduler interno
   // interno funcionando o tempo todo. Um serviço de cron externo GRATUITO
   // (ex: cron-job.org) chama esta rota a cada poucos minutos: isso acorda
   // a aplicação E dispara um tick do scheduler, que só executa de fato se
@@ -166,38 +177,98 @@ export async function buildWebServer(deps: WebServerDeps): Promise<FastifyInstan
     }
   });
 
+  app.get("/api/scheduler/events", async (_request, reply) => {
+    const settings = await repos.settings.getOperationalSettings();
+    const latestFinishedSchedulerRun = await prisma.run.findFirst({
+      where: { triggeredBy: "scheduler", finishedAt: { not: null } },
+      orderBy: { finishedAt: "desc" },
+      select: { id: true, finishedAt: true },
+    });
+
+    reply.hijack();
+    reply.raw.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
+    });
+
+    const onRunFinished = (event: SchedulerRunFinishedEvent) => {
+      reply.raw.write(`event: run-finished\ndata: ${JSON.stringify(event)}\n\n`);
+    };
+    const heartbeat = setInterval(() => reply.raw.write(": keep-alive\n\n"), 30_000);
+    const cleanup = () => {
+      clearInterval(heartbeat);
+      schedulerRunEvents.off("run-finished", onRunFinished);
+    };
+    schedulerRunEvents.on("run-finished", onRunFinished);
+    reply.raw.on("close", cleanup);
+    reply.raw.write(": connected\n\n");
+    if (
+      latestFinishedSchedulerRun &&
+      latestFinishedSchedulerRun.finishedAt !== null &&
+      latestFinishedSchedulerRun.id !== settings.schedulerRefreshRunId
+    ) {
+      onRunFinished({
+        runId: latestFinishedSchedulerRun.id,
+        finishedAt: latestFinishedSchedulerRun.finishedAt.toISOString(),
+      });
+    }
+  });
+
   app.get("/api/dashboard", async (_request, reply) => {
     const settings = await repos.settings.getOperationalSettings();
     const hasActiveRun = await repos.run.hasActiveRun();
     const lastFinishedAt = await repos.run.getLastFinishedAt();
+    const schedulerIntervalAnchor = getLatestSchedulerAnchor(
+      lastFinishedAt,
+      settings.automationResumeAt,
+      settings.schedulerRefreshAt,
+    );
     const effectiveMode = resolveEffectiveMode(envRunMode, settings.dryRunEnabled);
+    const now = new Date();
 
     const recentRuns = await prisma.run.findMany({ orderBy: { startedAt: "desc" }, take: 5 });
+    const latestFinishedSchedulerRun = await prisma.run.findFirst({
+      where: { triggeredBy: "scheduler", finishedAt: { not: null } },
+      orderBy: { finishedAt: "desc" },
+      select: { id: true, finishedAt: true },
+    });
 
     // Contador de buscas de hoje (seção 2) - reaproveita o histórico de Run
     // já existente, sem nenhum armazenamento novo.
     const searchesToday = await repos.run.countRunsSince(startOfDaysAgo(1));
 
     // Roda EXATAMENTE a mesma decisão que o cron interno roda a cada
-    // minuto (decideTick), só que aqui é somente para exibição - não
+    // segundo (decideTick), só que aqui é somente para exibição - não
     // dispara nada. É isso que permite ao painel mostrar o motivo real
     // pelo qual a automação não disparou sozinha, em vez do usuário ter
     // que adivinhar.
     const dailyLimitReached = await isDailyLimitReached(repos, settings, effectiveMode);
     const schedulerDecision = decideTick({
-      now: new Date(),
+      now,
       automationEnabled: settings.automationEnabled,
-      automationStartHour: settings.automationStartHour,
-      automationEndHour: settings.automationEndHour,
+      operatingHoursEnabled: settings.operatingHoursEnabled,
+      automationStartTime: settings.automationStartTime,
+      automationEndTime: settings.automationEndTime,
+      automationTimeZone: settings.automationTimeZone,
       intervalBetweenRoundsMinutes: settings.intervalBetweenRoundsMinutes,
-      lastRunFinishedAt: lastFinishedAt,
+      lastRunFinishedAt: schedulerIntervalAnchor,
       hasActiveRun,
       dailyLimitReached,
     });
-    const nextEligibleAt =
-      lastFinishedAt !== null
-        ? new Date(lastFinishedAt.getTime() + settings.intervalBetweenRoundsMinutes * 60_000)
-        : null;
+    const nextRunAt = getNextScheduledTickAt({
+      now,
+      automationEnabled: settings.automationEnabled,
+      operatingHoursEnabled: settings.operatingHoursEnabled,
+      automationStartTime: settings.automationStartTime,
+      automationEndTime: settings.automationEndTime,
+      automationTimeZone: settings.automationTimeZone,
+      intervalBetweenRoundsMinutes: settings.intervalBetweenRoundsMinutes,
+      lastRunFinishedAt: schedulerIntervalAnchor,
+      hasActiveRun,
+      dailyLimitReached,
+    });
 
     return reply.send({
       version: appVersion,
@@ -206,14 +277,21 @@ export async function buildWebServer(deps: WebServerDeps): Promise<FastifyInstan
       effectiveMode,
       hasActiveRun,
       lastFinishedAt,
-      operatingHours: { start: settings.automationStartHour, end: settings.automationEndHour },
+      latestFinishedSchedulerRun,
+      schedulerRefreshRunId: settings.schedulerRefreshRunId,
+      operatingHours: {
+        enabled: settings.operatingHoursEnabled,
+        start: settings.automationStartTime,
+        end: settings.automationEndTime,
+        timeZone: settings.automationTimeZone,
+      },
       intervalBetweenRoundsMinutes: settings.intervalBetweenRoundsMinutes,
       recentRuns,
       searchesToday,
       schedulerStatus: {
         willRunOnNextTick: schedulerDecision.shouldRun,
         reason: schedulerDecision.reason,
-        nextEligibleAt,
+        nextRunAt,
       },
     });
   });
@@ -239,6 +317,37 @@ export async function buildWebServer(deps: WebServerDeps): Promise<FastifyInstan
     await settingsRepo.saveOperationalSettings(merged, request.session.adminId);
 
     return reply.send(merged);
+  });
+
+  app.post("/api/scheduler/refresh-complete", async (request, reply) => {
+    const parsed = SchedulerRefreshSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: "Execução inválida" });
+    }
+    const run = await prisma.run.findUnique({
+      where: { id: parsed.data.runId },
+      select: { id: true, triggeredBy: true, finishedAt: true },
+    });
+    if (!run || run.triggeredBy !== "scheduler" || run.finishedAt === null) {
+      return reply.code(404).send({ error: "Execução automática concluída não encontrada" });
+    }
+
+    const current = await repos.settings.getOperationalSettings();
+    if (current.schedulerRefreshRunId === run.id) {
+      return reply.send({ acknowledged: true, alreadyAcknowledged: true });
+    }
+    const settingsRepo = repos.settings as unknown as {
+      saveOperationalSettings: (s: typeof current, updatedBy?: string) => Promise<void>;
+    };
+    await settingsRepo.saveOperationalSettings(
+      {
+        ...current,
+        schedulerRefreshRunId: run.id,
+        schedulerRefreshAt: new Date().toISOString(),
+      },
+      request.session.adminId,
+    );
+    return reply.send({ acknowledged: true, alreadyAcknowledged: false });
   });
 
   app.post("/api/run-now", async (request, reply) => {
@@ -276,9 +385,13 @@ export async function buildWebServer(deps: WebServerDeps): Promise<FastifyInstan
 
     let updated = current;
     if (parsed.data.action === "pause") {
-      updated = { ...current, automationEnabled: false };
+      updated = { ...current, automationEnabled: false, automationResumeAt: null };
     } else if (parsed.data.action === "resume") {
-      updated = { ...current, automationEnabled: true };
+      updated = {
+        ...current,
+        automationEnabled: true,
+        automationResumeAt: new Date().toISOString(),
+      };
     } else if (parsed.data.action === "force_dry_run") {
       updated = { ...current, dryRunEnabled: true };
     }

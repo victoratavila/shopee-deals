@@ -71,8 +71,10 @@ describe("limite diário bloqueia a execução inteira (não rejeita oferta por 
     const base = {
       now: new Date(2026, 0, 1, 12, 0),
       automationEnabled: true,
-      automationStartHour: 8,
-      automationEndHour: 22,
+      operatingHoursEnabled: true,
+      automationStartTime: "08:00",
+      automationEndTime: "22:00",
+      automationTimeZone: "America/Sao_Paulo",
       intervalBetweenRoundsMinutes: 60,
       lastRunFinishedAt: null,
       hasActiveRun: false,

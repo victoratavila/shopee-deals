@@ -1,5 +1,14 @@
 import { z } from "zod";
 
+const IanaTimeZoneSchema = z.string().min(1).refine((timeZone) => {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone });
+    return true;
+  } catch {
+    return false;
+  }
+}, "Fuso horário IANA inválido");
+
 /**
  * Todas as regras de negócio configuráveis pelo painel administrativo
  * (seção 6 do escopo), sem necessidade de alterar código. Persistidas na
@@ -30,17 +39,23 @@ export const OperationalSettingsSchema = z.object({
   maxOffersFetchedPerRound: z.number().int().min(1).nullable().default(null),
   searchLimitScope: z.enum(["ROUND", "CATEGORY"]).default("ROUND"),
   intervalBetweenRoundsMinutes: z.number().int().min(1).default(60),
+  reprocessIntervalMinutes: z.number().int().min(0).default(1_440),
 
-  automationStartHour: z.number().int().min(0).max(23).default(8),
-  automationEndHour: z.number().int().min(0).max(23).default(22),
+  operatingHoursEnabled: z.boolean().default(true),
+  automationStartTime: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/).default("08:00"),
+  automationEndTime: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/).default("22:00"),
+  automationTimeZone: IanaTimeZoneSchema.default("America/Sao_Paulo"),
 
-  minDaysBeforeRepublish: z.number().int().min(0).nullable().default(7),
+  republishIntervalMinutes: z.number().int().min(0).nullable().default(10_080),
 
   // Limiar para considerar um preço anterior "suspeito" em relação ao
   // histórico real armazenado (ver seção 8 do escopo).
   suspiciousPriceDeviationPercent: z.number().min(0).default(60),
 
   automationEnabled: z.boolean().default(false),
+  automationResumeAt: z.string().datetime().nullable().default(null),
+  schedulerRefreshRunId: z.string().nullable().default(null),
+  schedulerRefreshAt: z.string().datetime().nullable().default(null),
   dryRunEnabled: z.boolean().default(true),
 
   // Busca por categorias/palavras-chave configuráveis
@@ -54,6 +69,23 @@ export const OperationalSettingsSchema = z.object({
 });
 
 export type OperationalSettings = z.infer<typeof OperationalSettingsSchema>;
+
+export function parseOperationalSettings(input: unknown): OperationalSettings {
+  if (typeof input === "object" && input !== null && !Array.isArray(input)) {
+    const stored = { ...input } as Record<string, unknown>;
+    const legacyRepublishDays = stored["minDaysBeforeRepublish"];
+    if (
+      stored["republishIntervalMinutes"] === undefined &&
+      (typeof legacyRepublishDays === "number" || legacyRepublishDays === null)
+    ) {
+      stored["republishIntervalMinutes"] =
+        legacyRepublishDays === null ? null : legacyRepublishDays * 1_440;
+    }
+    delete stored["minDaysBeforeRepublish"];
+    return OperationalSettingsSchema.parse(stored);
+  }
+  return OperationalSettingsSchema.parse(input);
+}
 
 export function defaultOperationalSettings(): OperationalSettings {
   return OperationalSettingsSchema.parse({});

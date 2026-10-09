@@ -23,8 +23,11 @@ Implementado nesta etapa:
   entidades.
 - Pipeline completo (`runPipeline`) com duplicidade, limites, republicação
   prematura, preço suspeito, filtros, Deal Score e persistência.
-- Scheduler automático (`node-cron`) com kill switch, janela de horário,
-  intervalo mínimo entre rodadas e recuperação após reinício.
+- Scheduler automático com timer para a próxima execução e revalidação periódica de configurações, kill switch e intervalo mínimo
+  entre rodadas e recuperação após reinício. A janela de funcionamento é
+  configurável no painel em formato 24 horas (`HH:MM`), com fuso horário
+  IANA selecionável; também pode ser desativada para respeitar somente o
+  intervalo entre execuções.
 - Modos TEST / DRY_RUN / PRODUCTION.
 - Painel administrativo (Fastify): login com sessão + argon2, rate
   limiting, Helmet, dashboard, configurações editáveis, execução manual,
@@ -54,10 +57,20 @@ Implementado nesta etapa:
 - Limites de busca e aprovação são independentes: as ofertas buscadas são
   processadas e registradas; ofertas válidas que excedem
   `maxOffersPerRound` são marcadas como `ROUND_LIMIT_REACHED`.
+- Produtos identificados são deduplicados pelo ID Shopee e não passam por
+  nova avaliação antes do intervalo `reprocessIntervalMinutes` (padrão:
+  24 horas). O intervalo vale para rejeições e produtos já aprovados; após
+  expirar, uma nova busca pode avaliá-los novamente sem apagar o histórico
+  anterior de rejeições. A regra de republicação é configurada em minutos
+  (`republishIntervalMinutes`), independentemente do intervalo de reprocessamento.
 - O limite `maxOffersFetchedPerRound` pode ser aplicado à rodada inteira
   (`ROUND`) ou separadamente a cada categoria selecionada (`CATEGORY`).
   Quando uma categoria tem várias palavras-chave, o limite dela é dividido
   entre essas palavras-chave.
+- A integração real embaralha aleatoriamente os produtos de cada página
+  recebida antes do processamento, evitando uma ordem fixa no processamento.
+  A API da Shopee não oferece parâmetro de ordenação aleatória documentado,
+  portanto ainda controla quais produtos compõem cada página.
 - **Limite diário agora trava a execução inteira**, não só rejeita ofertas
   uma a uma: ao atingir `maxOffersPerDay`, nenhuma nova execução roda -
   nem automática (scheduler) nem manual ("Executar agora") - até o limite

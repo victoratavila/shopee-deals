@@ -18,6 +18,7 @@ import { defaultOperationalSettings, type OperationalSettings } from "../src/con
 type FakeProduct = StoredProduct & {
   priceHistory: number[];
   name: string;
+  processedAt: Date;
   url?: string;
   imageUrl?: string;
   affiliateLink?: string;
@@ -88,6 +89,7 @@ export function createInMemoryRepositories(settingsOverride?: Partial<Operationa
         currentPrice: offer.currentPrice,
         priceHistory: existing?.priceHistory ?? [],
         name: offer.name,
+        processedAt: new Date(),
         url: offer.url,
         ...(offer.imageUrl !== undefined ? { imageUrl: offer.imageUrl } : {}),
         affiliateLink,
@@ -101,6 +103,22 @@ export function createInMemoryRepositories(settingsOverride?: Partial<Operationa
       };
       state.products.set(offer.shopeeItemId, stored);
       return stored;
+    },
+    async findLastProcessedAtByShopeeItemIds(shopeeItemIds) {
+      const itemIds = new Set(shopeeItemIds);
+      const latestByItemId = new Map<string, Date>();
+      for (const itemId of itemIds) {
+        const stored = state.products.get(itemId);
+        if (stored) latestByItemId.set(itemId, stored.processedAt);
+      }
+      for (const rejection of state.rejected) {
+        if (!itemIds.has(rejection.shopeeItemId)) continue;
+        const previous = latestByItemId.get(rejection.shopeeItemId);
+        if (previous === undefined || rejection.createdAt > previous) {
+          latestByItemId.set(rejection.shopeeItemId, rejection.createdAt);
+        }
+      }
+      return latestByItemId;
     },
   };
 

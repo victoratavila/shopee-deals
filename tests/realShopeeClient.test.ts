@@ -16,6 +16,7 @@ function mockFetchOnce(status: number, jsonBody: unknown) {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe("RealShopeeClient - assinatura", () => {
@@ -98,6 +99,26 @@ describe("RealShopeeClient - mapeamento de ofertas", () => {
       variables: { keyword?: string };
     };
     expect(requestBody.variables.keyword).toBe("Fone bluetooth");
+  });
+
+  it("embaralha aleatoriamente os produtos recebidos antes de devolvê-los", async () => {
+    mockFetchOnce(200, {
+      data: {
+        productOfferV2: {
+          nodes: [
+            { itemId: 1, productName: "A", productLink: "https://shopee.test/a", offerLink: "a", priceMin: "1" },
+            { itemId: 2, productName: "B", productLink: "https://shopee.test/b", offerLink: "b", priceMin: "1" },
+            { itemId: 3, productName: "C", productLink: "https://shopee.test/c", offerLink: "c", priceMin: "1" },
+          ],
+          pageInfo: { hasNextPage: false },
+        },
+      },
+    });
+    vi.spyOn(Math, "random").mockReturnValue(0);
+
+    const result = await new RealShopeeClient(config).searchOffers({ page: 1, pageSize: 10 });
+
+    expect(result.offers.map((offer) => offer.shopeeItemId)).toEqual(["2", "3", "1"]);
   });
 });
 

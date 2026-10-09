@@ -11,6 +11,37 @@ export class PrismaProductRepository implements ProductRepository {
     return { id: product.id, shopeeItemId: product.shopeeItemId, currentPrice: Number(product.currentPrice) };
   }
 
+  async findLastProcessedAtByShopeeItemIds(shopeeItemIds: string[]): Promise<Map<string, Date>> {
+    const itemIds = [...new Set(shopeeItemIds)];
+    if (itemIds.length === 0) return new Map();
+
+    const [products, rejections] = await Promise.all([
+      this.prisma.product.findMany({
+        where: { shopeeItemId: { in: itemIds } },
+        select: { shopeeItemId: true, updatedAt: true },
+      }),
+      this.prisma.rejectedOffer.groupBy({
+        by: ["shopeeItemId"],
+        where: { shopeeItemId: { in: itemIds } },
+        _max: { createdAt: true },
+      }),
+    ]);
+
+    const lastProcessedAt = new Map<string, Date>();
+    for (const product of products) {
+      lastProcessedAt.set(product.shopeeItemId, product.updatedAt);
+    }
+    for (const rejection of rejections) {
+      const rejectedAt = rejection._max.createdAt;
+      if (rejectedAt === null) continue;
+      const previous = lastProcessedAt.get(rejection.shopeeItemId);
+      if (previous === undefined || rejectedAt > previous) {
+        lastProcessedAt.set(rejection.shopeeItemId, rejectedAt);
+      }
+    }
+    return lastProcessedAt;
+  }
+
   async upsert(offer: RawShopeeOffer, affiliateLink: string): Promise<StoredProduct> {
     const data = {
       name: offer.name,

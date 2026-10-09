@@ -206,8 +206,14 @@ export class RealShopeeClient implements ShopeeClient {
         : {}),
     });
 
+    const offers = data.productOfferV2.nodes.map(RealShopeeClient.mapNodeToOffer);
+    for (let index = offers.length - 1; index > 0; index--) {
+      const swapIndex = Math.floor(Math.random() * (index + 1));
+      [offers[index], offers[swapIndex]] = [offers[swapIndex]!, offers[index]!];
+    }
+
     return {
-      offers: data.productOfferV2.nodes.map(RealShopeeClient.mapNodeToOffer),
+      offers,
       hasNextPage: data.productOfferV2.pageInfo.hasNextPage,
     };
   }

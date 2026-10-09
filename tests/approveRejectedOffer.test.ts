@@ -266,7 +266,7 @@ describe("aprovação automática vs. manual - fluxo esperado", () => {
       minRatingCount: 0,
       minSalesCount: 0,
       maxOffersPerDay: 1,
-      minDaysBeforeRepublish: null, // isola o teste - só queremos testar o limite diário aqui
+      republishIntervalMinutes: null, // isola o teste - só queremos testar o limite diário aqui
     });
     await runPipeline({ shopeeClient: new MockShopeeClient(), repos, mode: "TEST", triggeredBy: "test" });
     const rejected = repos.state.rejected.find((r) => r.shopeeItemId === "FIXTURE-002")!;
