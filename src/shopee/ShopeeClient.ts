@@ -4,6 +4,9 @@ export interface SearchOffersParams {
   page: number;
   pageSize: number;
   category?: string;
+  /** Palavra-chave de busca (categorias/keywords configuráveis). Campo
+   *  separado de `category` (que é o conceito de categoria oficial da Shopee). */
+  keyword?: string;
 }
 
 export interface SearchOffersResult {

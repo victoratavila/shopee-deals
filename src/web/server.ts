@@ -16,11 +16,36 @@ import { OperationalSettingsSchema } from "../config/operationalSettings.js";
 import { runPipeline, ConcurrentRunError } from "../pipeline/runPipeline.js";
 import {
   approveRejectedOfferManually,
+  revertManualApproval,
+  rejectApprovedOfferManually,
   RejectedOfferNotFoundError,
   AlreadyApprovedError,
   MissingSnapshotError,
+  RecentlyPublishedError,
+  DailyLimitReachedError,
+  PublishedDealNotFoundError,
+  NotManuallyApprovedError,
+  UseUndoInsteadError,
 } from "../pipeline/approveRejectedOffer.js";
-import { resolveEffectiveMode, schedulerTick } from "../scheduler/scheduler.js";
+import { resolveEffectiveMode, schedulerTick, decideTick } from "../scheduler/scheduler.js";
+import { isDailyLimitReached } from "../pipeline/dailyLimit.js";
+import { startOfDaysAgo, clampPeriodDays } from "../utils/dateRange.js";
+
+/** Forma esperada do JSON salvo em RejectedOffer.offerSnapshot - é o RawShopeeOffer serializado. */
+interface RawShopeeOfferLike {
+  name?: string;
+  url?: string;
+  imageUrl?: string;
+  currentPrice?: number;
+  previousPrice?: number;
+  discountPercent?: number;
+  rating?: number;
+  ratingCount?: number;
+  salesCount?: number;
+  commissionPercent?: number;
+  affiliateLink?: string;
+  shopId?: string;
+}
 
 declare module "@fastify/session" {
   interface FastifySessionObject {
@@ -143,6 +168,31 @@ export async function buildWebServer(deps: WebServerDeps): Promise<FastifyInstan
 
     const recentRuns = await prisma.run.findMany({ orderBy: { startedAt: "desc" }, take: 5 });
 
+    // Contador de buscas de hoje (seção 2) - reaproveita o histórico de Run
+    // já existente, sem nenhum armazenamento novo.
+    const searchesToday = await repos.run.countRunsSince(startOfDaysAgo(1));
+
+    // Roda EXATAMENTE a mesma decisão que o cron interno roda a cada
+    // minuto (decideTick), só que aqui é somente para exibição - não
+    // dispara nada. É isso que permite ao painel mostrar o motivo real
+    // pelo qual a automação não disparou sozinha, em vez do usuário ter
+    // que adivinhar.
+    const dailyLimitReached = await isDailyLimitReached(repos, settings, effectiveMode);
+    const schedulerDecision = decideTick({
+      now: new Date(),
+      automationEnabled: settings.automationEnabled,
+      automationStartHour: settings.automationStartHour,
+      automationEndHour: settings.automationEndHour,
+      intervalBetweenRoundsMinutes: settings.intervalBetweenRoundsMinutes,
+      lastRunFinishedAt: lastFinishedAt,
+      hasActiveRun,
+      dailyLimitReached,
+    });
+    const nextEligibleAt =
+      lastFinishedAt !== null
+        ? new Date(lastFinishedAt.getTime() + settings.intervalBetweenRoundsMinutes * 60_000)
+        : null;
+
     return reply.send({
       version: appVersion,
       automationEnabled: settings.automationEnabled,
@@ -151,7 +201,14 @@ export async function buildWebServer(deps: WebServerDeps): Promise<FastifyInstan
       hasActiveRun,
       lastFinishedAt,
       operatingHours: { start: settings.automationStartHour, end: settings.automationEndHour },
+      intervalBetweenRoundsMinutes: settings.intervalBetweenRoundsMinutes,
       recentRuns,
+      searchesToday,
+      schedulerStatus: {
+        willRunOnNextTick: schedulerDecision.shouldRun,
+        reason: schedulerDecision.reason,
+        nextEligibleAt,
+      },
     });
   });
 
@@ -191,6 +248,9 @@ export async function buildWebServer(deps: WebServerDeps): Promise<FastifyInstan
       return reply.send(result);
     } catch (err) {
       if (err instanceof ConcurrentRunError) {
+        return reply.code(409).send({ error: err.message });
+      }
+      if (err instanceof DailyLimitReachedError) {
         return reply.code(409).send({ error: err.message });
       }
       request.log.error(err);
@@ -234,23 +294,135 @@ export async function buildWebServer(deps: WebServerDeps): Promise<FastifyInstan
   });
 
   // Todas as rejeições recentes, de qualquer execução - o que alimenta a
-  // aba "Ofertas rejeitadas" do painel (seção 14).
+  // aba "Ofertas rejeitadas" do painel (seção 14). Suporta filtro por
+  // período: ?days=1 (hoje) | ?days=2 | ?days=3. O período máximo é sempre
+  // MAX_REJECTIONS_PERIOD_DAYS (3), imposto aqui no backend - um pedido de
+  // mais que isso é reduzido ao máximo, nunca atendido integralmente. O
+  // filtro é aplicado no banco (não busca tudo e filtra no app) - ver
+  // RejectedOfferRepository.listRecent.
   app.get("/api/rejections", async (request, reply) => {
-    const limit = Math.min(Number((request.query as Record<string, string>)["limit"] ?? 30), 100);
-    const rejections = await repos.rejectedOffer.listRecent(limit);
+    const query = request.query as Record<string, string>;
+    const limit = Math.min(Number(query["limit"] ?? 100), 300);
+
+    const requestedDays = query["days"] !== undefined ? Number(query["days"]) : undefined;
+    const days = clampPeriodDays(requestedDays);
+    const since = startOfDaysAgo(days);
+
+    const rejections = await repos.rejectedOffer.listRecent(limit, since);
+    const totalPending = await repos.rejectedOffer.countPending(since);
     // Nunca devolve o offerSnapshot bruto pro front — só o que a UI precisa mostrar.
-    return reply.send(
-      rejections.map((r) => ({
-        id: r.id,
-        shopeeItemId: r.shopeeItemId,
-        productName: r.productName,
-        reason: r.reason,
-        details: r.details,
-        canApprove: r.offerSnapshot !== null && r.manuallyApprovedAt === null,
-        manuallyApprovedAt: r.manuallyApprovedAt,
-        createdAt: r.createdAt,
-      })),
-    );
+    const items = rejections
+      // Já aprovadas não aparecem mais como "pendente" - elas passam a
+      // aparecer em Ofertas publicadas, com a marca "manual".
+      .filter((r) => r.manuallyApprovedAt === null)
+      .map((r) => {
+        let imageUrl: string | null = null;
+        let currentPrice: number | null = null;
+        let discountPercent: number | null = null;
+        let searchCategoryId: string | null = null;
+        let searchCategoryName: string | null = null;
+        if (r.offerSnapshot) {
+          try {
+            const snapshot = JSON.parse(r.offerSnapshot) as {
+              imageUrl?: string;
+              currentPrice?: number;
+              discountPercent?: number;
+              searchCategoryId?: string;
+              searchCategoryName?: string;
+            };
+            imageUrl = snapshot.imageUrl ?? null;
+            currentPrice = snapshot.currentPrice ?? null;
+            discountPercent = snapshot.discountPercent ?? null;
+            searchCategoryId = snapshot.searchCategoryId ?? null;
+            searchCategoryName = snapshot.searchCategoryName ?? null;
+          } catch {
+            // snapshot corrompido - segue sem esses dados extras, não é crítico
+          }
+        }
+        return {
+          id: r.id,
+          shopeeItemId: r.shopeeItemId,
+          productName: r.productName,
+          imageUrl,
+          currentPrice,
+          discountPercent,
+          searchCategoryId,
+          searchCategoryName,
+          reason: r.reason,
+          details: r.details,
+          canApprove: r.offerSnapshot !== null,
+          createdAt: r.createdAt,
+        };
+      });
+
+    return reply.send({ since: since ? since.toISOString() : null, total: totalPending, rejections: items });
+  });
+
+  // Apaga todas as rejeições pendentes (não as já aprovadas manualmente),
+  // para o usuário limpar o banco quando quiser. Não tem filtro de período -
+  // limpa tudo que está pendente, independente da janela de dias exibida.
+  app.delete("/api/rejections", async (_request, reply) => {
+    const deletedCount = await repos.rejectedOffer.deleteAllPending();
+    return reply.send({ deletedCount });
+  });
+
+  // Apaga TODAS as ofertas (aprovadas + rejeitadas, incluindo as já
+  // aprovadas manualmente), pra facilitar resetar o banco entre rodadas de
+  // teste. A checagem de modo é feita AQUI, no backend - esconder o botão
+  // no painel não seria suficiente, porque alguém ainda poderia chamar essa
+  // rota diretamente. Nunca funciona em PRODUCTION, mesmo que alguém tente.
+  app.post("/api/testing/wipe-offers", async (_request, reply) => {
+    const settings = await repos.settings.getOperationalSettings();
+    const effectiveMode = resolveEffectiveMode(envRunMode, settings.dryRunEnabled);
+    if (effectiveMode === "PRODUCTION") {
+      return reply.code(403).send({
+        error: "Essa ação só é permitida nos modos Teste ou Ensaio, nunca em Produção.",
+      });
+    }
+    const deletedDeals = await repos.publishedDeal.deleteAll();
+    const deletedRejections = await repos.rejectedOffer.deleteAll();
+    return reply.send({ deletedDeals, deletedRejections });
+  });
+
+  // Detalhe completo de uma rejeição específica - alimenta o modal de
+  // auditoria (seção 3). Expõe tudo que já está armazenado no snapshot,
+  // sem inventar campos que o sistema não tem.
+  app.get("/api/rejections/:id", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const rejected = await repos.rejectedOffer.findById(id);
+    if (!rejected) return reply.code(404).send({ error: "Oferta rejeitada não encontrada." });
+
+    let snapshot: RawShopeeOfferLike = {};
+    if (rejected.offerSnapshot) {
+      try {
+        snapshot = JSON.parse(rejected.offerSnapshot) as RawShopeeOfferLike;
+      } catch {
+        // snapshot corrompido - segue só com os campos que vieram do banco
+      }
+    }
+
+    return reply.send({
+      id: rejected.id,
+      shopeeItemId: rejected.shopeeItemId,
+      productName: rejected.productName ?? snapshot.name ?? null,
+      productUrl: snapshot.url ?? null,
+      imageUrl: snapshot.imageUrl ?? null,
+      currentPrice: snapshot.currentPrice ?? null,
+      previousPrice: snapshot.previousPrice ?? null,
+      discountPercent: snapshot.discountPercent ?? null,
+      rating: snapshot.rating ?? null,
+      ratingCount: snapshot.ratingCount ?? null,
+      salesCount: snapshot.salesCount ?? null,
+      commissionPercent: snapshot.commissionPercent ?? null,
+      affiliateLink: snapshot.affiliateLink ?? null,
+      shopId: snapshot.shopId ?? null,
+      reason: rejected.reason,
+      details: rejected.details,
+      createdAt: rejected.createdAt,
+      manuallyApprovedAt: rejected.manuallyApprovedAt,
+      manuallyApprovedBy: rejected.manuallyApprovedBy,
+      canApprove: rejected.offerSnapshot !== null && rejected.manuallyApprovedAt === null,
+    });
   });
 
   // Reverte manualmente uma rejeição automática (seção 14 - intervenção humana).
@@ -271,6 +443,8 @@ export async function buildWebServer(deps: WebServerDeps): Promise<FastifyInstan
     } catch (err) {
       if (err instanceof RejectedOfferNotFoundError) return reply.code(404).send({ error: err.message });
       if (err instanceof AlreadyApprovedError) return reply.code(409).send({ error: err.message });
+      if (err instanceof RecentlyPublishedError) return reply.code(409).send({ error: err.message });
+      if (err instanceof DailyLimitReachedError) return reply.code(409).send({ error: err.message });
       if (err instanceof MissingSnapshotError) return reply.code(422).send({ error: err.message });
       request.log.error(err);
       return reply.code(500).send({ error: "Falha ao aprovar a oferta manualmente" });
@@ -279,12 +453,53 @@ export async function buildWebServer(deps: WebServerDeps): Promise<FastifyInstan
 
   app.get("/api/deals", async (request, reply) => {
     const limit = Math.min(Number((request.query as Record<string, string>)["limit"] ?? 20), 100);
-    const deals = await prisma.publishedDeal.findMany({
-      orderBy: { publishedAt: "desc" },
-      take: limit,
-      include: { product: true },
-    });
-    return reply.send(deals);
+    const deals = await repos.publishedDeal.listRecent(limit);
+    // Total de verdade, sem o teto do "limit" da consulta - sem isso, o
+    // contador do painel travava no valor de "limit" (ex: sempre "100")
+    // quando havia mais publicações que isso, mesmo depois de desfazer uma.
+    const total = await repos.publishedDeal.countPublishedSince(new Date(0));
+    return reply.send({ total, deals });
+  });
+
+  // Detalhe completo de uma oferta publicada - alimenta o modal de
+  // auditoria (seção 3). Todos os campos já vêm do Product + PublishedDeal
+  // existentes (ver PublishedDealRepository.findById).
+  app.get("/api/deals/:id", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const deal = await repos.publishedDeal.findById(id);
+    if (!deal) return reply.code(404).send({ error: "Oferta publicada não encontrada." });
+    return reply.send(deal);
+  });
+
+  // Desfaz uma aprovação manual feita por engano - volta a oferta pra lista
+  // de rejeitadas pendentes, como se a aprovação nunca tivesse acontecido.
+  app.post("/api/deals/:id/revert", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    try {
+      await revertManualApproval(repos, id);
+      return reply.send({ ok: true });
+    } catch (err) {
+      if (err instanceof PublishedDealNotFoundError) return reply.code(404).send({ error: err.message });
+      if (err instanceof NotManuallyApprovedError) return reply.code(422).send({ error: err.message });
+      request.log.error(err);
+      return reply.code(500).send({ error: "Falha ao desfazer a aprovação" });
+    }
+  });
+
+  // Rejeita manualmente uma oferta que tinha sido aprovada AUTOMATICAMENTE -
+  // o inverso de "Aprovar manualmente". Ofertas aprovadas manualmente usam
+  // /revert (acima), que restaura a rejeição original em vez de criar uma nova.
+  app.post("/api/deals/:id/reject", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    try {
+      await rejectApprovedOfferManually(repos, id, request.session.adminId!);
+      return reply.send({ ok: true });
+    } catch (err) {
+      if (err instanceof PublishedDealNotFoundError) return reply.code(404).send({ error: err.message });
+      if (err instanceof UseUndoInsteadError) return reply.code(422).send({ error: err.message });
+      request.log.error(err);
+      return reply.code(500).send({ error: "Falha ao rejeitar a oferta" });
+    }
   });
 
   // Nunca vazar stack trace para o usuário (seção 17).

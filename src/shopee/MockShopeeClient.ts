@@ -1,4 +1,8 @@
-import type { ShopeeClient, SearchOffersParams, SearchOffersResult } from "./ShopeeClient.js";
+import type {
+  ShopeeClient,
+  SearchOffersParams,
+  SearchOffersResult,
+} from "./ShopeeClient.js";
 import { FIXTURE_OFFERS } from "./fixtures.js";
 
 /**
@@ -12,9 +16,13 @@ export class MockShopeeClient implements ShopeeClient {
   async searchOffers(params: SearchOffersParams): Promise<SearchOffersResult> {
     const start = (params.page - 1) * params.pageSize;
     const end = start + params.pageSize;
-    const filtered = params.category
+    let filtered = params.category
       ? FIXTURE_OFFERS.filter((o) => o.category === params.category)
       : FIXTURE_OFFERS;
+    if (params.keyword) {
+      const needle = params.keyword.trim().toLowerCase();
+      filtered = filtered.filter((o) => o.name.toLowerCase().includes(needle));
+    }
 
     return {
       offers: filtered.slice(start, end),

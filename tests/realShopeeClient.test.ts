@@ -84,6 +84,21 @@ describe("RealShopeeClient - mapeamento de ofertas", () => {
     expect(offer.commissionPercent).toBeCloseTo(8, 5); // 0.08 -> 8%
     expect(offer.affiliateLink).toBe("https://s.shopee.com.br/abc123");
   });
+
+  it("envia a palavra-chave configurada à consulta GraphQL da Shopee", async () => {
+    const fetchMock = mockFetchOnce(200, {
+      data: { productOfferV2: { nodes: [], pageInfo: { hasNextPage: false } } },
+    });
+
+    const client = new RealShopeeClient(config);
+    await client.searchOffers({ page: 1, pageSize: 50, keyword: "Fone bluetooth" });
+
+    const [, options] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const requestBody = JSON.parse(options.body as string) as {
+      variables: { keyword?: string };
+    };
+    expect(requestBody.variables.keyword).toBe("Fone bluetooth");
+  });
 });
 
 describe("RealShopeeClient - classificação de erros", () => {

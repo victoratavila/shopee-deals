@@ -2,7 +2,8 @@ import cron from "node-cron";
 import type { ShopeeClient } from "../shopee/ShopeeClient.js";
 import type { Repositories } from "../db/repositories.js";
 import type { RunMode } from "../types/domain.js";
-import { runPipeline, ConcurrentRunError, type PipelineResult } from "../pipeline/runPipeline.js";
+import { runPipeline, ConcurrentRunError, DailyLimitReachedError, type PipelineResult } from "../pipeline/runPipeline.js";
+import { isDailyLimitReached } from "../pipeline/dailyLimit.js";
 
 export interface SchedulerDeps {
   shopeeClient: ShopeeClient;
@@ -50,12 +51,16 @@ export function decideTick(params: {
   intervalBetweenRoundsMinutes: number;
   lastRunFinishedAt: Date | null;
   hasActiveRun: boolean;
+  dailyLimitReached: boolean;
 }): TickDecision {
   if (!params.automationEnabled) {
     return { shouldRun: false, reason: "Automação desativada (kill switch)" };
   }
   if (params.hasActiveRun) {
     return { shouldRun: false, reason: "Já existe uma execução em andamento" };
+  }
+  if (params.dailyLimitReached) {
+    return { shouldRun: false, reason: "Limite diário de ofertas já foi atingido" };
   }
   if (!isWithinOperatingHours(params.now, params.automationStartHour, params.automationEndHour)) {
     return { shouldRun: false, reason: "Fora do horário de funcionamento configurado" };
@@ -74,6 +79,8 @@ export async function schedulerTick(deps: SchedulerDeps): Promise<PipelineResult
   const settings = await repos.settings.getOperationalSettings();
   const hasActiveRun = await repos.run.hasActiveRun();
   const lastRunFinishedAt = await repos.run.getLastFinishedAt();
+  const mode = resolveEffectiveMode(envRunMode, settings.dryRunEnabled);
+  const dailyLimitReached = await isDailyLimitReached(repos, settings, mode);
 
   const decision = decideTick({
     now: new Date(),
@@ -83,13 +90,12 @@ export async function schedulerTick(deps: SchedulerDeps): Promise<PipelineResult
     intervalBetweenRoundsMinutes: settings.intervalBetweenRoundsMinutes,
     lastRunFinishedAt,
     hasActiveRun,
+    dailyLimitReached,
   });
 
   if (!decision.shouldRun) {
     return null;
   }
-
-  const mode = resolveEffectiveMode(envRunMode, settings.dryRunEnabled);
 
   try {
     const result = await runPipeline({ shopeeClient, repos, mode, triggeredBy: "scheduler" });
@@ -100,6 +106,13 @@ export async function schedulerTick(deps: SchedulerDeps): Promise<PipelineResult
   } catch (err) {
     if (err instanceof ConcurrentRunError) {
       logger?.info("[scheduler] execução concorrente detectada, pulando este tick");
+      return null;
+    }
+    if (err instanceof DailyLimitReachedError) {
+      // Corrida rara: passou no decideTick mas o limite foi atingido por
+      // outra execução entre a checagem e a tentativa - o pipeline já
+      // barra isso sozinho, aqui só evitamos logar como erro de verdade.
+      logger?.info("[scheduler] limite diário atingido, pulando este tick");
       return null;
     }
     logger?.error("[scheduler] erro inesperado durante execução automática", err);

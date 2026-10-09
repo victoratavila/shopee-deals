@@ -83,8 +83,14 @@ model PublishedDeal {
 
   // Preenchido quando a oferta foi originalmente rejeitada pelo sistema e um
   // administrador decidiu aprová-la manualmente pelo painel (seção 14).
-  approvedManually Boolean        @default(false)
-  approvedBy       String?
+  approvedManually     Boolean        @default(false)
+  approvedBy           String?
+  searchCategoryId     String?
+  searchCategoryName   String?
+  // Referência solta (sem FK) à RejectedOffer de origem, usada só para
+  // permitir "Desfazer aprovação" no painel. Não é uma relação Prisma de
+  // verdade porque a ligação é opcional nos dois sentidos.
+  sourceRejectedOfferId String?
 
   publishedAt      DateTime       @default(now())
 
@@ -133,6 +139,21 @@ model Run {
 }
 
 // ---------------------------------------------------------------------------
+// SCHEDULER LOCK (linha única - garante que só existe um Run RUNNING por vez)
+// ---------------------------------------------------------------------------
+// Sem isso, a checagem "já existe execução em andamento?" + criação do Run
+// não era atômica: duas execuções quase simultâneas (scheduler + clique
+// manual, por exemplo) podiam passar pela checagem ao mesmo tempo e criar
+// dois Runs concorrentes - o que abriria brecha para a mesma oferta ser
+// aprovada/publicada duas vezes. Ver PrismaRunRepository.create().
+model SchedulerLock {
+  id       Int       @id @default(1)
+  locked   Boolean   @default(false)
+  lockedAt DateTime?
+  runId    String?
+}
+
+// ---------------------------------------------------------------------------
 // REJECTED OFFERS (motivo de rejeição, por execução)
 // ---------------------------------------------------------------------------
 enum RejectionReason {
@@ -150,12 +171,19 @@ enum RejectionReason {
   INVALID_DATA
   DAILY_LIMIT_REACHED
   ROUND_LIMIT_REACHED
+  // Oferta que tinha sido aprovada (automaticamente ou manualmente) e um
+  // administrador decidiu rejeitar depois, pelo painel - o inverso da
+  // aprovação manual.
+  MANUALLY_REJECTED
 }
 
 model RejectedOffer {
   id                 String          @id @default(cuid())
-  runId              String
-  run                Run             @relation(fields: [runId], references: [id], onDelete: Cascade)
+  // Opcional (igual a PublishedDeal.runId) - uma rejeição manual de uma
+  // oferta que já estava aprovada não nasce de uma execução do pipeline,
+  // então não tem um Run associado.
+  runId              String?
+  run                Run?            @relation(fields: [runId], references: [id], onDelete: Cascade)
 
   shopeeItemId       String
   productName        String?
@@ -176,6 +204,7 @@ model RejectedOffer {
 
   @@index([runId])
   @@index([reason])
+  @@index([createdAt])
 }
 
 // ---------------------------------------------------------------------------

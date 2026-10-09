@@ -1,18 +1,17 @@
 import type { ShopeeClient } from "../shopee/ShopeeClient.js";
 import { ShopeeApiError } from "../shopee/ShopeeClient.js";
 import type { Repositories } from "../db/repositories.js";
+import { ConcurrentRunError } from "../db/repositories.js";
 import type { RawShopeeOffer, RejectedOfferResult, RunMode } from "../types/domain.js";
 import { evaluateOffer, toRejectedOfferResult } from "../filters/evaluateOffer.js";
 import { checkSuspiciousPrice } from "../pricehistory/suspiciousPrice.js";
 import { calculateDealScore, DEFAULT_DEAL_SCORE_WEIGHTS, type DealScoreWeights } from "../dealscore/calculateDealScore.js";
 import { withRetry, withTimeout } from "../utils/retry.js";
+import { isDailyLimitReached, DailyLimitReachedError } from "./dailyLimit.js";
 
-export class ConcurrentRunError extends Error {
-  constructor() {
-    super("Já existe uma execução em andamento. Aguarde ela terminar antes de iniciar outra.");
-    this.name = "ConcurrentRunError";
-  }
-}
+// Reexportado por compatibilidade - o restante do projeto (server.ts,
+// scheduler.ts, testes) importa esses erros a partir daqui.
+export { ConcurrentRunError, DailyLimitReachedError };
 
 export interface AcceptedOfferSummary {
   offer: RawShopeeOffer;
@@ -79,9 +78,13 @@ export async function runPipeline(opts: RunPipelineOptions): Promise<PipelineRes
   const shopeeTimeoutMs = opts.shopeeTimeoutMs ?? 10_000;
   const shopeeMaxAttempts = opts.shopeeMaxAttempts ?? 3;
 
-  const fetchOffersPage = (page: number) =>
+  const fetchOffersPage = (page: number, keyword?: string) =>
     withRetry(
-      () => withTimeout(() => shopeeClient.searchOffers({ page, pageSize: 50 }), shopeeTimeoutMs, "shopee.searchOffers"),
+      () => withTimeout(
+        () => shopeeClient.searchOffers({ page, pageSize: 50, ...(keyword !== undefined ? { keyword } : {}) }),
+        shopeeTimeoutMs,
+        "shopee.searchOffers",
+      ),
       { maxAttempts: shopeeMaxAttempts, isRetryable: isRetryableShopeeError },
     );
 
@@ -91,116 +94,205 @@ export async function runPipeline(opts: RunPipelineOptions): Promise<PipelineRes
       { maxAttempts: shopeeMaxAttempts, isRetryable: isRetryableShopeeError },
     );
 
-  if (await repos.run.hasActiveRun()) {
-    throw new ConcurrentRunError();
+  const startedAt = Date.now();
+
+  // Checagem do limite diário ANTES de sequer criar o Run: se já foi
+  // atingido, nenhuma execução acontece - nem automática, nem manual -
+  // até o usuário aumentar o limite ou o dia virar. Isso troca o
+  // comportamento antigo (rejeitar ofertas individualmente e guardar cada
+  // rejeição com motivo DAILY_LIMIT_REACHED) por travar a execução como um
+  // todo, sem gerar nenhum dado no banco para as ofertas que nem chegaram
+  // a ser buscadas.
+  const settings = await repos.settings.getOperationalSettings();
+  if (await isDailyLimitReached(repos, settings, mode)) {
+    throw new DailyLimitReachedError(settings.maxOffersPerDay!);
   }
 
-  const startedAt = Date.now();
+  // repos.run.create() é atômico (adquire o lock e cria o Run numa operação
+  // só) - lança ConcurrentRunError se já houver uma execução em andamento.
+  // Não fazemos mais um "hasActiveRun() ? throw : create()" separado, porque
+  // isso deixava uma brecha entre a checagem e a criação onde duas
+  // execuções concorrentes (scheduler + manual, por exemplo) podiam passar
+  // pela checagem ao mesmo tempo.
   const { id: runId } = await repos.run.create(mode, triggeredBy);
 
-  const settings = await repos.settings.getOperationalSettings();
-  const republishCutoff = new Date(Date.now() - settings.minDaysBeforeRepublish * 24 * 60 * 60 * 1000);
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
+  // null = sem restrição de republicação (o produto pode ser publicado de novo a qualquer momento).
+  const republishCutoff =
+    settings.minDaysBeforeRepublish !== null
+      ? new Date(Date.now() - settings.minDaysBeforeRepublish * 24 * 60 * 60 * 1000)
+      : null;
 
   const seenInRound = new Set<string>();
   const accepted: AcceptedOfferSummary[] = [];
   const rejected: RejectedOfferResult[] = [];
   let productsFound = 0;
   let errorsCount = 0;
-
-  const alreadyPublishedToday = await repos.publishedDeal.countPublishedSince(todayStart);
-  let publishedTodayCount = alreadyPublishedToday;
-
-  try {
-    let page = 1;
-    let hasNextPage = true;
-
-    while (hasNextPage && page <= maxPages) {
-      const result = await fetchOffersPage(page);
-      hasNextPage = result.hasNextPage;
-      productsFound += result.offers.length;
-
-      for (const offer of result.offers) {
-        try {
-          // --- duplicidade dentro da própria rodada ---
-          if (seenInRound.has(offer.shopeeItemId)) {
-            rejected.push(rejectWithSnapshot(offer, { accepted: false, reason: "DUPLICATE" }));
-            continue;
-          }
-          seenInRound.add(offer.shopeeItemId);
-
-          // --- limites de quantidade (seção 6/12) ---
-          if (accepted.length >= settings.maxOffersPerRound) {
-            rejected.push(rejectWithSnapshot(offer, { accepted: false, reason: "ROUND_LIMIT_REACHED" }));
-            continue;
-          }
-          if (publishedTodayCount + accepted.length >= settings.maxOffersPerDay) {
-            rejected.push(rejectWithSnapshot(offer, { accepted: false, reason: "DAILY_LIMIT_REACHED" }));
-            continue;
-          }
-
-          const existingProduct = await repos.product.findByShopeeItemId(offer.shopeeItemId);
-
-          const recentlyPublished = await repos.publishedDeal.wasRecentlyPublished(
-            offer.shopeeItemId,
-            republishCutoff,
-          );
-
-          const priceStats = existingProduct ? await repos.priceHistory.getStats(existingProduct.id) : null;
-          const suspicious = checkSuspiciousPrice(offer, priceStats, settings.suspiciousPriceDeviationPercent);
-
-          const evaluation = evaluateOffer(offer, settings, {
-            recentlyPublished,
-            isDuplicateInRound: false, // já tratado acima
-            isSuspiciousPrice: suspicious.suspicious,
-            ...(suspicious.reason !== undefined ? { suspiciousReason: suspicious.reason } : {}),
-          });
-
-          if (!evaluation.accepted) {
-            rejected.push(rejectWithSnapshot(offer, evaluation));
-            continue;
-          }
-
-          // --- oferta aceita: persistir produto, histórico e "publicação" ---
-          const affiliateLink = offer.affiliateLink ?? (await fetchAffiliateLink(offer.shopeeItemId));
-          const product = await repos.product.upsert(offer, affiliateLink);
-          await repos.priceHistory.recordIfChanged(product.id, offer.currentPrice);
-
-          const { score } = calculateDealScore({ offer, priceStats }, weights);
-
-          await repos.publishedDeal.create({
-            productId: product.id,
-            priceAtPublish: offer.currentPrice,
-            dealScore: score,
-            channel: channelForMode(mode),
-            runId,
-          });
-
-          accepted.push({ offer, dealScore: score, affiliateLink });
-        } catch (err) {
-          errorsCount++;
-          await repos.errorLog.record({
-            runId,
-            scope: "pipeline.offer",
-            message: err instanceof Error ? err.message : String(err),
-            ...(err instanceof Error && err.stack !== undefined ? { stack: err.stack } : {}),
-            context: { shopeeItemId: offer.shopeeItemId },
-          });
-          // Uma falha em um produto não interrompe a rodada (seção 5/22).
+  // Determina os termos de busca. O teto pode ser compartilhado pela rodada
+  // toda ou reaplicado separadamente a cada categoria selecionada.
+  // No modo global, palavras repetidas entre categorias são consultadas uma vez.
+  const categoryScopedLimit =
+    settings.searchMode === "CATEGORIES" && settings.searchLimitScope === "CATEGORY";
+  const searchTargets: Array<{
+    keyword?: string;
+    groupId: string;
+    limit: number | null;
+    categoryId?: string;
+    categoryName?: string;
+  }> = [];
+  const globallyScheduledKeywords = new Set<string>();
+  if (settings.searchMode === "CATEGORIES" && settings.keywordCategories.length > 0) {
+    for (const [categoryIndex, category] of settings.keywordCategories.entries()) {
+      if (!category.selected) continue;
+      const uniqueKeywords = new Map<string, string>();
+      for (const keyword of category.keywords) {
+        const trimmed = keyword.trim();
+        if (trimmed.length > 0 && !uniqueKeywords.has(trimmed.toLowerCase())) {
+          uniqueKeywords.set(trimmed.toLowerCase(), trimmed);
         }
       }
-
-      page++;
+      const keywords = [...uniqueKeywords.values()];
+      const groupId = categoryScopedLimit ? `category-${categoryIndex}` : "round";
+      for (const [keywordIndex, keyword] of keywords.entries()) {
+        const normalizedKeyword = keyword.toLowerCase();
+        if (!categoryScopedLimit && globallyScheduledKeywords.has(normalizedKeyword)) continue;
+        globallyScheduledKeywords.add(normalizedKeyword);
+        const categoryLimit =
+          categoryScopedLimit && settings.maxOffersFetchedPerRound !== null && keywords.length > 0
+            ? Math.floor(settings.maxOffersFetchedPerRound / keywords.length) +
+              (keywordIndex < settings.maxOffersFetchedPerRound % keywords.length ? 1 : 0)
+            : settings.maxOffersFetchedPerRound;
+        searchTargets.push({
+          keyword,
+          groupId: categoryScopedLimit ? `${groupId}-keyword-${keywordIndex}` : groupId,
+          limit: categoryLimit,
+          categoryId: `keyword:${normalizedKeyword}`,
+          categoryName: keyword,
+        });
+      }
     }
-  } catch (err) {
-    errorsCount++;
-    await repos.errorLog.record({
-      runId,
-      scope: "pipeline.search",
-      message: err instanceof Error ? err.message : String(err),
-      ...(err instanceof Error && err.stack !== undefined ? { stack: err.stack } : {}),
+  }
+
+  // Sem categorias ou palavras-chave selecionadas, usar a busca geral.
+  if (searchTargets.length === 0) {
+    searchTargets.push({
+      groupId: "round",
+      limit: settings.maxOffersFetchedPerRound,
+      categoryId: "all-products",
+      categoryName: "Busca geral",
     });
+  }
+
+  const fetchedByGroup = new Map<string, number>();
+  for (const { keyword, groupId, limit, categoryId, categoryName } of searchTargets) {
+    try {
+      let page = 1;
+      let hasNextPage = true;
+
+      while (hasNextPage && page <= maxPages) {
+        const fetchedInGroup = fetchedByGroup.get(groupId) ?? 0;
+        if (limit !== null && fetchedInGroup >= limit) {
+          break;
+        }
+
+        const result = await fetchOffersPage(page, keyword);
+        hasNextPage = result.hasNextPage;
+
+        let offersThisPage = result.offers;
+        if (limit !== null) {
+          const remaining = limit - fetchedInGroup;
+          if (offersThisPage.length > remaining) {
+            offersThisPage = offersThisPage.slice(0, remaining);
+            hasNextPage = false;
+          }
+        }
+        if (categoryId !== undefined && categoryName !== undefined) {
+          offersThisPage = offersThisPage.map((offer) => ({
+            ...offer,
+            searchCategoryId: categoryId,
+            searchCategoryName: categoryName,
+          }));
+        }
+        fetchedByGroup.set(groupId, fetchedInGroup + offersThisPage.length);
+        productsFound += offersThisPage.length;
+
+        for (const offer of offersThisPage) {
+          try {
+            // --- duplicidade dentro da própria rodada ---
+            if (seenInRound.has(offer.shopeeItemId)) {
+              rejected.push(rejectWithSnapshot(offer, { accepted: false, reason: "DUPLICATE" }));
+              continue;
+            }
+            seenInRound.add(offer.shopeeItemId);
+
+            const existingProduct = await repos.product.findByShopeeItemId(offer.shopeeItemId);
+            const recentlyPublished =
+              republishCutoff !== null
+                ? await repos.publishedDeal.wasRecentlyPublished(offer.shopeeItemId, republishCutoff)
+                : false;
+            const priceStats = existingProduct ? await repos.priceHistory.getStats(existingProduct.id) : null;
+            const suspicious = checkSuspiciousPrice(offer, priceStats, settings.suspiciousPriceDeviationPercent);
+            const evaluation = evaluateOffer(offer, settings, {
+              recentlyPublished,
+              isDuplicateInRound: false,
+              isSuspiciousPrice: suspicious.suspicious,
+              ...(suspicious.reason !== undefined ? { suspiciousReason: suspicious.reason } : {}),
+            });
+
+            if (!evaluation.accepted) {
+              rejected.push(rejectWithSnapshot(offer, evaluation));
+              continue;
+            }
+
+            if (settings.maxOffersPerRound !== null && accepted.length >= settings.maxOffersPerRound) {
+              rejected.push(rejectWithSnapshot(offer, {
+                accepted: false,
+                reason: "ROUND_LIMIT_REACHED",
+                details: `Limite de ${settings.maxOffersPerRound} ofertas aprovadas por rodada atingido`,
+              }));
+              continue;
+            }
+
+            const affiliateLink = offer.affiliateLink ?? (await fetchAffiliateLink(offer.shopeeItemId));
+            const product = await repos.product.upsert(offer, affiliateLink);
+            await repos.priceHistory.recordIfChanged(product.id, offer.currentPrice);
+            const { score } = calculateDealScore({ offer, priceStats }, weights);
+
+            await repos.publishedDeal.create({
+              productId: product.id,
+              priceAtPublish: offer.currentPrice,
+              dealScore: score,
+              channel: channelForMode(mode),
+              runId,
+              ...(offer.searchCategoryId !== undefined ? { searchCategoryId: offer.searchCategoryId } : {}),
+              ...(offer.searchCategoryName !== undefined ? { searchCategoryName: offer.searchCategoryName } : {}),
+            });
+            accepted.push({ offer, dealScore: score, affiliateLink });
+          } catch (err) {
+            errorsCount++;
+            await repos.errorLog.record({
+              runId,
+              scope: "pipeline.offer",
+              message: err instanceof Error ? err.message : String(err),
+              ...(err instanceof Error && err.stack !== undefined ? { stack: err.stack } : {}),
+              context: { shopeeItemId: offer.shopeeItemId },
+            });
+            // Uma falha em um produto não interrompe a rodada.
+          }
+        }
+
+        page++;
+      }
+    } catch (err) {
+      errorsCount++;
+      await repos.errorLog.record({
+        runId,
+        scope: "pipeline.search",
+        message: err instanceof Error ? err.message : String(err),
+        ...(err instanceof Error && err.stack !== undefined ? { stack: err.stack } : {}),
+        ...(keyword !== undefined ? { context: { keyword } } : {}),
+      });
+      // Uma falha em uma palavra-chave não interrompe as demais.
+    }
   }
 
   await repos.rejectedOffer.recordMany(runId, rejected);

@@ -9,6 +9,9 @@ export interface RawShopeeOffer {
   url: string;
   imageUrl?: string;
   category?: string;
+  /** Categoria configurada que originou a busca, diferente da categoria da Shopee. */
+  searchCategoryId?: string;
+  searchCategoryName?: string;
 
   currentPrice: number;
   previousPrice?: number;
@@ -37,7 +40,8 @@ export type RejectionReason =
   | "DUPLICATE"
   | "INVALID_DATA"
   | "DAILY_LIMIT_REACHED"
-  | "ROUND_LIMIT_REACHED";
+  | "ROUND_LIMIT_REACHED"
+  | "MANUALLY_REJECTED";
 
 export interface RejectedOfferResult {
   shopeeItemId: string;

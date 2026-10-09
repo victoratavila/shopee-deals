@@ -28,9 +28,52 @@ Implementado nesta etapa:
 - Modos TEST / DRY_RUN / PRODUCTION.
 - Painel administrativo (Fastify): login com sessão + argon2, rate
   limiting, Helmet, dashboard, configurações editáveis, execução manual,
-  kill switch, histórico. UI mobile-first em `src/web/public/index.html`.
+  kill switch, histórico. UI mobile-first em `src/web/public/index.html`,
+  `styles.css` e `app.js` (arquivos separados, sem inline - exigido pela
+  Content Security Policy do Helmet).
+- **Painel reformulado**: tela inicial simplificada (status, ações, ofertas
+  com miniatura da imagem do produto) separada de uma segunda aba
+  ("Execuções e configurações") com o histórico e os parâmetros. Cada
+  filtro numérico tem um botão "Sem limite" (desativa aquele filtro sem
+  precisar zerar/inflar o valor). Ofertas publicadas têm botão "Copiar
+  link" (link de afiliado pronto) e, quando aprovadas manualmente, um
+  botão "Desfazer" que reverte a aprovação e a oferta volta a aparecer
+  como rejeitada pendente.
+- **Filtro de período em "Ofertas rejeitadas"**: Hoje ou Últimos 3 dias
+  (teto de 3 dias imposto no backend, não só escondido no frontend),
+  agrupado visualmente por data.
+- **Contador de buscas do dia** no dashboard (automáticas do scheduler vs.
+  manuais via "Executar agora" vs. total) - reaproveita o histórico de
+  execuções já existente, sem armazenamento novo.
+- **Modal de detalhes**: clicar em qualquer oferta (rejeitada ou aprovada)
+  abre um modal com todos os dados já armazenados - preço, desconto,
+  avaliação, vendas, comissão, loja, Deal Score, motivo da rejeição, datas,
+  links - útil para auditar por que o sistema decidiu aprovar ou rejeitar.
+- **Tooltips** em cada campo de configuração, explicando o que controla,
+  a unidade e o que "Sem limite" significa.
+- Limites de busca e aprovação são independentes: as ofertas buscadas são
+  processadas e registradas; ofertas válidas que excedem
+  `maxOffersPerRound` são marcadas como `ROUND_LIMIT_REACHED`.
+- O limite `maxOffersFetchedPerRound` pode ser aplicado à rodada inteira
+  (`ROUND`) ou separadamente a cada categoria selecionada (`CATEGORY`).
+  Quando uma categoria tem várias palavras-chave, o limite dela é dividido
+  entre essas palavras-chave.
+- **Limite diário agora trava a execução inteira**, não só rejeita ofertas
+  uma a uma: ao atingir `maxOffersPerDay`, nenhuma nova execução roda -
+  nem automática (scheduler) nem manual ("Executar agora") - até o limite
+  ser aumentado ou o dia virar. A contagem é por canal (TEST/DRY_RUN não
+  se misturam), pra dar pra testar essa trava sem afetar outro modo.
+- **Ocultar e excluir ofertas rejeitadas**: botão para minimizar a lista
+  sem perder os dados, e outro para apagar em massa todas as rejeições
+  pendentes (preserva as já aprovadas manualmente, que o "Desfazer"
+  precisa).
+- **Totais por data** nas duas listas (rejeitadas e aprovadas), mostrados
+  no cabeçalho de cada grupo de dia ("Hoje (4)", "Ontem (2)"...).
+- **Estado da automação visível no dashboard** (ativa/pausada + janela de
+  horário), pra facilitar diagnosticar por que o scheduler não está
+  disparando sozinho.
 - Recuperação automática de execuções travadas por crash.
-- **38 testes automatizados passando**, incluindo testes de resiliência
+- **Testes automatizados passando**, incluindo testes de resiliência
   (timeout, retry, rate limit, erro não-retryable, resposta inesperada da
   API, falha do banco em um produto específico, recuperação de run
   travado). Typecheck strict sem erros, build de produção validado.
@@ -117,12 +160,24 @@ SHOPEE_AFFILIATE_ID="..."   # opcional, ainda não usado diretamente
 e reiniciar a aplicação — a factory troca automaticamente do
 `MockShopeeClient` para o `RealShopeeClient`.
 
+No modo **Categorias específicas**, cada palavra-chave das categorias
+marcadas é enviada em uma busca separada à Shopee. Palavras repetidas
+(ignorando espaços nas extremidades e diferenças entre maiúsculas/minúsculas)
+são consultadas uma vez quando o limite é global. O limite de ofertas buscadas
+pode ser aplicado à rodada inteira ou separadamente por categoria. No modo
+por categoria, quando uma categoria tem várias palavras-chave, o limite é
+dividido entre elas. O limite de ofertas aprovadas continua global e não impede
+que as demais ofertas sejam avaliadas e registradas como rejeitadas.
+As listas de ofertas aprovadas e rejeitadas identificam a palavra-chave que
+encontrou cada item com uma etiqueta colorida estável por palavra-chave. Os
+grupos servem apenas para organizar termos e ativá-los em conjunto.
+
 **Duas limitações da API pública que valem calibrar no painel depois de
 ativar:**
 - Ela não expõe "quantidade de avaliações" (`ratingCount`) por produto —
   só a nota média. O filtro `minRatingCount` (padrão: 20) rejeitaria toda
   oferta real por falta desse dado. Assim que ativar, mude esse valor para
-  `0` em Configurações no painel.
+  `0` ou use "Sem limite" em Configurações no painel.
 - Não existe um campo de "preço anterior" explícito — o sistema estima a
   partir do percentual de desconto informado (`priceMin / (1 - desconto)`),
   então a detecção de preço suspeito (seção 8) fica um pouco menos precisa

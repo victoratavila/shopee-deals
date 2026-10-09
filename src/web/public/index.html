@@ -16,69 +16,183 @@
   <div class="row mt-14">
     <button class="btn-primary" id="btn-login">Entrar</button>
   </div>
-  <div id="login-msg" class="msg"></div>
+  <div id="login-msg" class="msg" role="alert"></div>
 </div>
 
 <div id="app">
   <header>
     <h1>Shopee Deals</h1>
-    <p>Painel administrativo</p>
+    <nav class="tabs" role="tablist" aria-label="Seções do painel">
+      <button class="tab-btn active" data-view="home" role="tab" aria-selected="true">Início</button>
+      <button class="tab-btn" data-view="runs" role="tab" aria-selected="false">Execuções e configurações</button>
+    </nav>
   </header>
+
   <main>
 
-    <div class="card">
-      <h2>Status</h2>
-      <div class="stat-grid">
-        <div class="stat"><div class="value" id="stat-mode">—</div><div class="label">Modo efetivo</div></div>
-        <div class="stat"><div class="value" id="stat-active">—</div><div class="label">Execução em andamento</div></div>
+    <!-- ===================== TELA INICIAL ===================== -->
+    <section id="view-home" class="view">
+
+      <!-- 1. Estado da automação - a informação mais importante, sempre visível primeiro -->
+      <div class="card status-card">
+        <div class="status-primary">
+          <span class="dot" id="stat-active-dot" aria-hidden="true"></span>
+          <span class="status-primary-text" id="stat-active-text">—</span>
+          <span class="pill-mode" id="stat-mode">—</span>
+          <span class="info-icon" id="stat-mode-info" data-tooltip="" tabindex="0" aria-label="O que este modo faz">?</span>
+        </div>
+
+        <div class="row mt-12">
+          <button class="btn-primary" id="btn-run-now">▶ Executar agora</button>
+          <button class="btn-secondary" id="btn-toggle-automation">—</button>
+        </div>
+
+        <!-- Só fica visível fora do modo Produção (controlado via JS após
+             carregar o dashboard) - o backend também bloqueia essa ação em
+             Produção, então esconder aqui é só uma camada extra, não a
+             proteção real. -->
+        <button class="btn-danger btn-small mt-12" id="btn-wipe-offers" hidden>
+          🧹 Limpar todas as ofertas (uso em teste)
+        </button>
+
+        <details class="disclosure">
+          <summary>Mais detalhes</summary>
+          <div class="stat-grid">
+            <div class="stat-mini">
+              <span class="stat-mini-label">Janela de funcionamento</span>
+              <span class="stat-mini-value" id="stat-hours">—</span>
+            </div>
+            <div class="stat-mini">
+              <span class="stat-mini-label">Próxima checagem</span>
+              <span class="stat-mini-value" id="stat-scheduler-status">—</span>
+            </div>
+            <div class="stat-mini">
+              <span class="stat-mini-label">Última execução</span>
+              <span class="stat-mini-value" id="stat-last">—</span>
+            </div>
+            <div class="stat-mini">
+              <span class="stat-mini-label">Buscas hoje</span>
+              <span class="stat-mini-value" id="stat-searches-today">—</span>
+            </div>
+          </div>
+        </details>
       </div>
-      <p class="status-details">
-        Última execução finalizada: <span id="stat-last">—</span><br/>
-        Janela de funcionamento: <span id="stat-hours">—</span><br/>
-        Versão: <span id="stat-version">—</span>
-      </p>
-      <div class="row mt-12">
-        <button class="btn-primary" id="btn-run-now">Executar agora</button>
-        <button class="btn-secondary" data-kill="pause">Pausar automação</button>
-        <button class="btn-secondary" data-kill="resume">Retomar automação</button>
-        <button class="btn-danger" data-kill="force_dry_run">Forçar DRY_RUN</button>
+
+      <!-- 2/3. Ofertas e suas ações - uma lista por vez, pra não competir por atenção -->
+      <div class="segmented" role="tablist" aria-label="Ofertas">
+        <button class="segmented-btn active" data-offers-tab="rejected" role="tab" aria-selected="true">
+          Rejeitadas <span class="count-badge" id="count-rejected"></span>
+        </button>
+        <button class="segmented-btn" data-offers-tab="deals" role="tab" aria-selected="false">
+          Aprovadas <span class="count-badge" id="count-deals"></span>
+        </button>
       </div>
-      <div id="action-msg" class="msg"></div>
-    </div>
 
-    <div class="card">
-      <h2>Execuções recentes</h2>
-      <table id="runs-table">
-        <thead><tr><th>Início</th><th>Modo</th><th>Status</th><th>Selecionadas</th><th>Erros</th></tr></thead>
-        <tbody></tbody>
-      </table>
-    </div>
+      <section id="offers-rejected" class="offers-panel">
+        <div class="row offers-toolbar">
+          <select id="rejected-period" aria-label="Período">
+            <option value="1">Hoje</option>
+            <option value="3" selected>Últimos 3 dias</option>
+          </select>
+          <button class="btn-small btn-secondary" id="btn-toggle-rejected">Ocultar</button>
+          <button class="btn-small btn-danger" id="btn-delete-rejected">Excluir tudo</button>
+          <span class="info-icon" data-tooltip="Não atenderam aos critérios configurados. 'Aprovar' é uma exceção manual - só use se achar que a rejeição foi equivocada." tabindex="0" aria-label="O que é esta lista">?</span>
+        </div>
+        <p class="period-label" id="rejected-period-label"></p>
+        <div id="rejected-list" class="offer-cards" aria-live="polite"></div>
+      </section>
 
-    <div class="card">
-      <h2>Ofertas rejeitadas</h2>
-      <div id="rejected-list"></div>
-    </div>
+      <section id="offers-deals" class="offers-panel" hidden>
+        <p class="section-hint-inline">
+          Já passaram pelos critérios e estão prontas para publicação futura.
+          <span class="info-icon" data-tooltip="Clique numa oferta para ver todos os detalhes, incluindo o Deal Score." tabindex="0" aria-label="Mais informações">?</span>
+        </p>
+        <div id="deals-list" class="offer-cards" aria-live="polite"></div>
+      </section>
 
-    <div class="card">
-      <h2>Ofertas publicadas</h2>
-      <div id="deals-list"></div>
-    </div>
+    </section>
 
-    <div class="card">
-      <h2>Configurações principais</h2>
-      <label>Desconto mínimo (%)<input id="cfg-minDiscountPercent" type="number" /></label>
-      <label>Avaliação mínima<input id="cfg-minRating" type="number" step="0.1" /></label>
-      <label>Máx. ofertas por rodada<input id="cfg-maxOffersPerRound" type="number" /></label>
-      <label>Máx. ofertas por dia<input id="cfg-maxOffersPerDay" type="number" /></label>
-      <label>Intervalo entre rodadas (min)<input id="cfg-intervalBetweenRoundsMinutes" type="number" /></label>
-      <div class="row mt-12">
-        <button class="btn-primary" id="btn-save-settings">Salvar configurações</button>
+    <!-- ===================== EXECUÇÕES + CONFIGURAÇÕES ===================== -->
+    <section id="view-runs" class="view" hidden>
+
+      <div class="card">
+        <h2>Execuções recentes</h2>
+        <div class="table-scroll">
+          <table id="runs-table">
+            <thead><tr><th>Início</th><th>Modo</th><th>Status</th><th>Selecionadas</th><th>Erros</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
       </div>
-      <div id="settings-msg" class="msg"></div>
-    </div>
+
+      <div class="card">
+        <h2>Configurações</h2>
+        <p class="section-hint">Use "Sem limite" para desativar um filtro específico.</p>
+
+        <details class="settings-group" open>
+          <summary>Filtros de qualidade da oferta</summary>
+          <div id="settings-fields-quality" class="settings-group-body"></div>
+        </details>
+        <details class="settings-group">
+          <summary>Limites e volume</summary>
+          <div id="settings-fields-volume" class="settings-group-body"></div>
+        </details>
+        <details class="settings-group">
+          <summary>Agendamento</summary>
+          <div id="settings-fields-schedule" class="settings-group-body"></div>
+        </details>
+
+        <details class="settings-group" id="settings-group-search">
+          <summary>Modo de busca e categorias</summary>
+          <div class="settings-group-body">
+            <label>Modo de busca</label>
+            <select id="cfg-searchMode">
+              <option value="ALL_PRODUCTS">Todos os produtos (padrão)</option>
+              <option value="CATEGORIES">Categorias específicas</option>
+            </select>
+
+            <label class="search-limit-label">Aplicar limite de ofertas buscadas</label>
+            <div class="search-limit-options" role="group" aria-label="Escopo do limite de ofertas buscadas">
+              <button type="button" class="search-limit-option active" data-search-limit-scope="ROUND" aria-pressed="true">
+                Na rodada inteira
+              </button>
+              <button type="button" class="search-limit-option" data-search-limit-scope="CATEGORY" aria-pressed="false">
+                Por categoria
+              </button>
+            </div>
+            <p class="search-limit-hint" id="search-limit-hint"></p>
+
+            <div id="search-preview" class="search-preview" hidden></div>
+
+            <div id="categories-panel">
+              <div class="row mt-12 row-center">
+                <strong class="categories-heading">Grupos de busca</strong>
+                <button class="btn-small btn-secondary" id="btn-add-category">+ Novo grupo</button>
+              </div>
+              <p class="search-groups-hint">O checkbox ativa ou desativa todas as palavras-chave do grupo. A label do produto mostrará a palavra-chave que encontrou aquele item.</p>
+              <div id="categories-list" class="categories-list"></div>
+            </div>
+          </div>
+        </details>
+
+        <div class="row mt-12">
+          <button class="btn-primary" id="btn-save-settings">Salvar configurações</button>
+        </div>
+      </div>
+
+    </section>
 
   </main>
 </div>
+
+<div id="detail-modal" class="modal-overlay" hidden>
+  <div class="modal-box" role="dialog" aria-modal="true">
+    <button class="modal-close" id="modal-close-btn" aria-label="Fechar">&times;</button>
+    <div id="modal-content"></div>
+  </div>
+</div>
+
+<div id="toast-container" class="toast-container" aria-live="polite"></div>
 
 <script src="/app.js"></script>
 </body>

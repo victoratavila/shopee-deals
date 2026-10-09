@@ -1,96 +1,474 @@
 :root {
-    --bg: #14161a;
-    --panel: #1c1f26;
-    --panel-alt: #22262f;
-    --text: #e9ebf0;
-    --text-dim: #9aa1ad;
-    --accent: #ff7a45;
-    --accent-dim: #a6461f;
-    --ok: #4fae7a;
-    --warn: #e0b23d;
-    --danger: #e0524d;
-    --border: #2b2f39;
-    --radius: 10px;
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0;
-    background: var(--bg);
-    color: var(--text);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    font-size: 15px;
-    line-height: 1.45;
-  }
-  header {
-    padding: 20px 16px 8px;
-  }
-  header h1 {
-    font-size: 20px;
-    margin: 0 0 2px;
-    letter-spacing: -0.01em;
-  }
-  header p { margin: 0; color: var(--text-dim); font-size: 13px; }
-  main { padding: 12px 16px 80px; max-width: 720px; margin: 0 auto; }
-  .card {
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 16px;
-    margin-bottom: 12px;
-  }
-  .card h2 { font-size: 14px; margin: 0 0 10px; color: var(--text-dim); font-weight: 600; }
-  .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-  .stat { background: var(--panel-alt); border-radius: 8px; padding: 10px 12px; }
-  .stat .value { font-size: 22px; font-weight: 700; }
-  .stat .label { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
-  .pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; }
-  .pill.ok { background: rgba(79,174,122,0.15); color: var(--ok); }
-  .pill.warn { background: rgba(224,178,61,0.15); color: var(--warn); }
-  .pill.danger { background: rgba(224,82,77,0.15); color: var(--danger); }
-  button {
-    font: inherit;
-    border: none;
-    border-radius: 8px;
-    padding: 10px 14px;
-    cursor: pointer;
-    font-weight: 600;
-  }
-  .btn-primary { background: var(--accent); color: #1a0e08; }
-  .btn-primary:active { background: var(--accent-dim); }
-  .btn-secondary { background: var(--panel-alt); color: var(--text); border: 1px solid var(--border); }
-  .btn-danger { background: rgba(224,82,77,0.15); color: var(--danger); }
-  .row { display: flex; gap: 8px; flex-wrap: wrap; }
-  input, select {
-    width: 100%;
-    background: var(--panel-alt);
-    border: 1px solid var(--border);
-    color: var(--text);
-    padding: 9px 10px;
-    border-radius: 8px;
-    font: inherit;
-    margin-top: 4px;
-  }
-  label { display: block; font-size: 12px; color: var(--text-dim); margin-top: 10px; }
-  table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  th, td { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--border); }
-  th { color: var(--text-dim); font-weight: 600; }
-  #login-screen { max-width: 320px; margin: 60px auto; padding: 0 16px; }
-  #app { display: none; }
-  .msg { font-size: 13px; margin-top: 8px; }
-  .msg.error { color: var(--danger); }
-  .msg.success { color: var(--ok); }
-  a { color: var(--accent); }
-  .offer-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--border); }
-  .offer-row:last-child { border-bottom: none; }
-  .offer-name { font-size: 13px; }
-  .offer-reason { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
-  .btn-approve { background: rgba(79,174,122,0.15); color: var(--ok); font-size: 12px; padding: 6px 10px; white-space: nowrap; }
-  .empty-hint { font-size: 13px; color: var(--text-dim); }
+  --bg: #14161a;
+  --panel: #1c1f26;
+  --panel-alt: #22262f;
+  --text: #e9ebf0;
+  --text-dim: #9aa1ad;
+  --accent: #ff7a45;
+  --accent-dim: #a6461f;
+  --ok: #4fae7a;
+  --warn: #e0b23d;
+  --danger: #e0524d;
+  --border: #2b2f39;
+  --radius: 10px;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 15px;
+  line-height: 1.45;
+}
+header {
+  padding: 20px 16px 0;
+}
+header h1 {
+  font-size: 20px;
+  margin: 0 0 12px;
+  letter-spacing: -0.01em;
+}
+main { padding: 12px 16px 80px; max-width: 720px; margin: 0 auto; }
 
-/* Utilitários de espaçamento (substituem atributos style inline, que a
-   Content Security Policy do Helmet bloqueia). */
+.tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+}
+.tab-btn {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font: inherit;
+  font-weight: 600;
+  padding: 10px 4px;
+  margin-right: 16px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+}
+.tab-btn.active { color: var(--text); border-bottom-color: var(--accent); }
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  margin-bottom: 16px;
+}
+.card h2 { font-size: 14px; margin: 0 0 10px; color: var(--text-dim); font-weight: 600; }
+
+.status-card { padding: 16px; }
+.status-primary { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.status-primary-text { font-size: 16px; font-weight: 600; }
+.pill-mode {
+  display: inline-block;
+  background: var(--panel-alt);
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--text-dim); display: inline-block; flex-shrink: 0; }
+.dot.on { background: var(--warn); }
+.dot.off { background: var(--ok); }
+
+/* "Mais detalhes" - progressive disclosure: informação de diagnóstico não
+   precisa competir com a ação principal, mas continua a um clique. */
+.disclosure { margin-top: 12px; }
+.disclosure summary {
+  font-size: 12px;
+  color: var(--text-dim);
+  cursor: pointer;
+  padding: 4px 0;
+  list-style: none;
+}
+.disclosure summary::-webkit-details-marker { display: none; }
+.disclosure summary::before { content: "▸ "; }
+.disclosure[open] summary::before { content: "▾ "; }
+.stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 8px; }
+.stat-mini { background: var(--panel-alt); border-radius: 8px; padding: 8px 10px; }
+.stat-mini-label { display: block; font-size: 11px; color: var(--text-dim); margin-bottom: 2px; }
+.stat-mini-value { display: block; font-size: 13px; }
+
+/* --- Abas de ofertas (segmented control): uma lista visível por vez --- */
+.segmented {
+  display: flex;
+  background: var(--panel-alt);
+  border-radius: 10px;
+  padding: 3px;
+  margin: 16px 0 12px;
+  gap: 3px;
+}
+.segmented-btn {
+  flex: 1;
+  background: transparent;
+  color: var(--text-dim);
+  border-radius: 8px;
+  padding: 9px 10px;
+  font-size: 13px;
+}
+.segmented-btn.active { background: var(--panel); color: var(--text); }
+.count-badge { color: var(--text-dim); font-weight: 400; }
+.segmented-btn.active .count-badge { color: var(--accent); }
+.offers-panel[hidden] { display: none; }
+.offers-toolbar { align-items: center; }
+.offers-toolbar select { width: auto; flex: 1; margin-top: 0; min-width: 140px; }
+.section-hint-inline { font-size: 12px; color: var(--text-dim); margin: 0 0 10px; }
+
+.section-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin: 20px 0 8px;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.section-heading h2 { font-size: 15px; margin: 0; }
+.section-hint { font-size: 12px; color: var(--text-dim); }
+
+.pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+.pill.ok { background: rgba(79,174,122,0.15); color: var(--ok); }
+.pill.warn { background: rgba(224,178,61,0.15); color: var(--warn); }
+.pill.danger { background: rgba(224,82,77,0.15); color: var(--danger); }
+
+button {
+  font: inherit;
+  border: none;
+  border-radius: 8px;
+  padding: 10px 14px;
+  cursor: pointer;
+  font-weight: 600;
+}
+button:disabled { opacity: 0.55; cursor: default; }
+.btn-primary { background: var(--accent); color: #1a0e08; }
+.btn-primary:active { background: var(--accent-dim); }
+.btn-primary-outline { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+.btn-secondary { background: var(--panel-alt); color: var(--text); border: 1px solid var(--border); }
+.btn-danger { background: rgba(224,82,77,0.15); color: var(--danger); }
+.btn-small { padding: 6px 10px; font-size: 12px; white-space: nowrap; }
+.btn-approve { background: rgba(79,174,122,0.15); color: var(--ok); }
+.btn-link { background: var(--panel-alt); color: var(--text); }
+.btn-revert { background: rgba(224,178,61,0.15); color: var(--warn); }
+.btn-toggle-limit {
+  background: var(--panel-alt);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  font-size: 12px;
+  padding: 8px 10px;
+  white-space: nowrap;
+}
+.btn-toggle-limit.active { background: rgba(255,122,69,0.15); color: var(--accent); border-color: transparent; }
+
+/* Foco visível consistente para navegação via teclado (acessibilidade) */
+button:focus-visible, input:focus-visible, select:focus-visible,
+a:focus-visible, summary:focus-visible, .info-icon:focus-visible,
+.offer-card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.row { display: flex; gap: 8px; flex-wrap: wrap; }
+input, select {
+  width: 100%;
+  background: var(--panel-alt);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 9px 10px;
+  border-radius: 8px;
+  font: inherit;
+  margin-top: 4px;
+}
+input:disabled { opacity: 0.4; }
+label { display: block; font-size: 12px; color: var(--text-dim); margin-top: 10px; }
+
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.table-scroll { overflow-x: auto; }
+th, td { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+th { color: var(--text-dim); font-weight: 600; }
+
+/* --- Configurações agrupadas em seções (accordion) --- */
+.settings-group { border: 1px solid var(--border); border-radius: 8px; margin-top: 10px; padding: 0 12px; }
+.settings-group summary {
+  cursor: pointer;
+  padding: 12px 0;
+  font-size: 13px;
+  font-weight: 600;
+  list-style: none;
+}
+.settings-group summary::-webkit-details-marker { display: none; }
+.settings-group summary::before { content: "▸ "; color: var(--text-dim); }
+.settings-group[open] summary::before { content: "▾ "; color: var(--text-dim); }
+.settings-group-body { padding-bottom: 12px; }
+
+#login-screen { max-width: 320px; margin: 60px auto; padding: 0 16px; }
+#app { display: none; }
+.msg { font-size: 13px; margin-top: 8px; min-height: 16px; }
+.msg.error { color: var(--danger); }
+.msg.success { color: var(--ok); }
+a { color: var(--accent); }
+
+/* --- Toast: feedback consistente, sempre no mesmo lugar, para qualquer ação --- */
+.toast-container {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  z-index: 200;
+  pointer-events: none;
+  padding: 0 16px;
+}
+.toast {
+  background: var(--panel-alt);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 10px 16px;
+  border-radius: 10px;
+  font-size: 13px;
+  max-width: 480px;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.4);
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 0.2s, transform 0.2s;
+}
+.toast.show { opacity: 1; transform: translateY(0); }
+.toast-success { border-color: var(--ok); }
+.toast-error { border-color: var(--danger); }
+
+/* --- Cards de oferta (rejeitadas / publicadas) --- */
+.offer-cards { display: flex; flex-direction: column; gap: 8px; }
+/* Mesmo problema já corrigido em .modal-overlay: sem isso, [hidden] perde
+   para a classe (empate de especificidade, autor vence o navegador) e o
+   botão "Ocultar" não tem efeito visual nenhum. */
+.offer-cards[hidden] { display: none; }
+.offer-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px;
+  cursor: pointer;
+  transition: background-color 0.12s, border-color 0.12s;
+}
+.offer-card:hover {
+  background: var(--panel-alt);
+  border-color: var(--accent);
+}
+.offer-thumb {
+  width: 48px;
+  height: 48px;
+  border-radius: 8px;
+  object-fit: cover;
+  background: var(--panel-alt);
+  flex-shrink: 0;
+}
+.offer-thumb-placeholder {
+  width: 48px;
+  height: 48px;
+  border-radius: 8px;
+  background: var(--panel-alt);
+  color: var(--text-dim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  flex-shrink: 0;
+}
+.offer-info { flex: 1; min-width: 0; }
+.offer-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.offer-name {
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.offer-category-badge {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-radius: 999px;
+  padding: 2px 8px;
+  color: #fff;
+  background: hsl(var(--category-hue) 58% 34%);
+  border: 1px solid hsl(var(--category-hue) 70% 58%);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.offer-category-unknown {
+  color: var(--text-dim);
+  background: var(--panel-alt);
+  border-color: var(--border);
+}
+.offer-meta { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
+.offer-actions { flex-shrink: 0; display: flex; gap: 6px; }
+.empty-hint { font-size: 13px; color: var(--text-dim); padding: 4px 0; }
+
+/* --- Filtro de período (Ofertas rejeitadas) --- */
+.period-label { font-size: 12px; color: var(--text-dim); margin: 6px 0 10px; }
+.date-group-heading {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  margin: 14px 0 4px;
+}
+.date-group-heading:first-child { margin-top: 0; }
+
+/* --- Modal de detalhes --- */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  z-index: 100;
+}
+/* Sem isso, [hidden] perde para a classe .modal-overlay no CSS (mesma
+   especificidade, e a folha de estilo do autor vence a do navegador) e o
+   modal fica visível mesmo com o atributo "hidden" presente. */
+.modal-overlay[hidden] {
+  display: none;
+}
+@media (min-width: 640px) {
+  .modal-overlay { align-items: center; }
+}
+.modal-box {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px 14px 0 0;
+  padding: 20px 16px 24px;
+  width: 100%;
+  max-width: 480px;
+  max-height: 85vh;
+  overflow-y: auto;
+  position: relative;
+}
+@media (min-width: 640px) {
+  .modal-box { border-radius: 14px; }
+}
+.modal-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  background: var(--panel-alt);
+  border: none;
+  border-radius: 50%;
+  width: 32px;
+  height: 32px;
+  font-size: 18px;
+  line-height: 1;
+  color: var(--text-dim);
+  padding: 0;
+}
+.modal-thumb { width: 100%; max-width: 180px; border-radius: 10px; display: block; margin: 0 auto 14px; }
+.modal-title { font-size: 16px; font-weight: 600; margin: 0 0 12px; padding-right: 30px; }
+.modal-row { display: flex; justify-content: space-between; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+.modal-row:last-child { border-bottom: none; }
+.modal-row .k { color: var(--text-dim); }
+.modal-row .v { text-align: right; word-break: break-word; }
+.modal-row .v a { color: var(--accent); }
+.modal-section-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-dim); margin: 16px 0 4px; }
+.modal-section-title:first-of-type { margin-top: 4px; }
+.modal-actions { display: flex; gap: 8px; margin-top: 14px; }
+
+/* --- Tooltips das configurações --- */
+.info-icon {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: var(--panel-alt);
+  color: var(--text-dim);
+  font-size: 10px;
+  font-style: normal;
+  margin-left: 5px;
+  cursor: help;
+  vertical-align: middle;
+}
+/* Tooltip renderizado por nós (não usamos o atributo "title" nativo do
+   navegador porque o tempo/local em que ele aparece varia demais entre
+   navegadores e sistemas - com isso, funciona sempre, na hora). */
+.info-icon::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--panel-alt);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.45;
+  width: max-content;
+  max-width: 240px;
+  white-space: normal;
+  text-align: left;
+  box-shadow: 0 6px 16px rgba(0,0,0,0.35);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.12s;
+  pointer-events: none;
+  z-index: 60;
+}
+.info-icon:hover::after,
+.info-icon:focus::after {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* --- Linha de configuração com toggle "sem limite" --- */
+.setting-row { display: flex; align-items: flex-end; gap: 8px; }
+.setting-row .setting-input { flex: 1; }
+.setting-row label { margin-top: 10px; }
+
+/* Utilitários de espaçamento */
 .mt-12 { margin-top: 12px; }
 .mt-14 { margin-top: 14px; }
 .login-title { margin-bottom: 4px; }
 .login-subtitle { color: var(--text-dim); margin-top: 0; }
 .status-details { margin-top: 10px; font-size: 13px; color: var(--text-dim); }
+
+/* --- Busca por categorias/palavras-chave --- */
+.search-preview { background: var(--panel-alt); border-radius: 8px; padding: 10px 12px; font-size: 12px; margin-top: 10px; line-height: 1.6; }
+.search-preview strong { display: block; margin-bottom: 4px; }
+.categories-list { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.category-card { background: var(--panel-alt); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+.category-header { display: flex; align-items: center; gap: 8px; }
+.category-name { flex: 1; font-size: 13px; font-weight: 600; }
+.keyword-list { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 5px; }
+.keyword-chip { display: inline-flex; align-items: center; gap: 4px; background: var(--panel); border: 1px solid var(--border); border-radius: 999px; padding: 2px 8px; font-size: 11px; }
+.keyword-chip button { background: none; border: none; color: var(--text-dim); font-size: 13px; padding: 0 0 0 2px; line-height: 1; cursor: pointer; font-weight: bold; }
+.keyword-add-row { display: flex; gap: 6px; margin-top: 8px; }
+.keyword-add-row input { flex: 1; margin-top: 0; padding: 6px 8px; font-size: 12px; }
+
+.row-center { align-items: center; }
+.categories-heading { flex: 1; font-size: 13px; }
+.search-groups-hint { color: var(--text-dim); font-size: 12px; margin: 6px 0 0; line-height: 1.5; }
+.search-limit-label { margin-top: 14px; }
+.search-limit-options { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.search-limit-option { flex: 1 1 180px; border: 1px solid var(--border); background: var(--panel-alt); color: var(--text); }
+.search-limit-option.active { border-color: var(--accent); background: var(--accent); color: var(--bg); }
+.search-limit-option:disabled { cursor: not-allowed; opacity: 0.55; }
+.search-limit-hint { color: var(--text-dim); font-size: 12px; margin: 6px 0 0; line-height: 1.5; }
+.category-name-input { flex: 1; min-width: 0; margin: 0; font-size: 13px; font-weight: 600; }
+.category-select { display: flex; align-items: center; }
+.category-select input { width: auto; margin: 0; }
+.category-keywords-label { color: var(--text-dim); font-size: 11px; margin-top: 8px; }
+.search-preview-category { margin-top: 5px; overflow-wrap: anywhere; }
+.search-preview-category span { color: var(--text-dim); }

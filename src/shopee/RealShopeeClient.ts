@@ -37,6 +37,11 @@ interface ProductOfferNode {
   productCatIds?: number[];
 }
 
+function parseOptionalNumber(value: string | number | undefined): number | undefined {
+  if (value === undefined || value === null) return undefined;
+  return Number(value);
+}
+
 /**
  * Implementação real da Shopee Affiliate Open API (GraphQL, assinatura
  * SHA256 simples - apesar do nome "Authorization: SHA256 ...", NÃO é HMAC:
@@ -49,8 +54,8 @@ interface ProductOfferNode {
  *   productOfferV2 - só a nota média (ratingStar). Por padrão o filtro
  *   `minRatingCount` do sistema é 20, o que rejeitaria TODAS as ofertas
  *   reais por falta desse dado. Assim que esta integração for ativada,
- *   ajuste `minRatingCount` para 0 no painel (Configurações), ou essa
- *   regra fica sem efeito prático.
+ *   ajuste `minRatingCount` para 0 ou `null` no painel (Configurações),
+ *   ou essa regra fica sem efeito prático.
  * - Não existe um campo de "preço anterior" explícito - ele é estimado a
  *   partir de `priceDiscountRate` (ver `estimatePreviousPrice` abaixo).
  *   Isso é uma aproximação, não o preço "de fato" antes da promoção.
@@ -138,23 +143,27 @@ export class RealShopeeClient implements ShopeeClient {
 
   private static mapNodeToOffer(node: ProductOfferNode): RawShopeeOffer {
     const currentPrice = Number(node.priceMin ?? node.priceMax ?? 0);
-    const discountPercent = node.priceDiscountRate;
-    const commissionPercent = node.commissionRate ? Number(node.commissionRate) * 100 : undefined;
+    const discountPercent = parseOptionalNumber(node.priceDiscountRate);
+    const rating = parseOptionalNumber(node.ratingStar);
+    const salesCount = parseOptionalNumber(node.sales);
+    const commissionRate = parseOptionalNumber(node.commissionRate);
+    const commissionPercent =
+      commissionRate !== undefined ? commissionRate * 100 : undefined;
     const previousPrice = RealShopeeClient.estimatePreviousPrice(currentPrice, discountPercent);
 
     return {
-      shopeeItemId: String(node.itemId),
+      shopeeItemId: node.itemId === undefined || node.itemId === null ? "" : String(node.itemId),
       ...(node.shopId !== undefined ? { shopId: String(node.shopId) } : {}),
-      name: node.productName,
-      url: node.productLink,
+      name: typeof node.productName === "string" ? node.productName : "",
+      url: typeof node.productLink === "string" ? node.productLink : "",
       ...(node.imageUrl !== undefined ? { imageUrl: node.imageUrl } : {}),
       ...(node.productCatIds?.[0] !== undefined ? { category: String(node.productCatIds[0]) } : {}),
       currentPrice,
       ...(previousPrice !== undefined ? { previousPrice } : {}),
       ...(discountPercent !== undefined ? { discountPercent } : {}),
-      ...(node.ratingStar !== undefined ? { rating: Number(node.ratingStar) } : {}),
+      ...(rating !== undefined ? { rating } : {}),
       // ratingCount não é exposto pela API pública - ver aviso na doc da classe.
-      ...(node.sales !== undefined ? { salesCount: node.sales } : {}),
+      ...(salesCount !== undefined ? { salesCount } : {}),
       ...(commissionPercent !== undefined ? { commissionPercent } : {}),
       // offerLink já vem com o tracking do seu Affiliate ID aplicado.
       affiliateLink: node.offerLink,
@@ -192,7 +201,9 @@ export class RealShopeeClient implements ShopeeClient {
     }>(query, {
       page: params.page,
       limit: params.pageSize,
-      ...(params.category !== undefined ? { keyword: params.category } : {}),
+      ...(params.keyword !== undefined ? { keyword: params.keyword }
+        : params.category !== undefined ? { keyword: params.category }
+        : {}),
     });
 
     return {

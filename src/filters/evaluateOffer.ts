@@ -15,6 +15,13 @@ export type EvaluationResult =
   | { accepted: true }
   | { accepted: false; reason: RejectionReason; details?: string };
 
+function isInvalidOptionalNumber(
+  value: number | undefined,
+  isValid: (number: number) => boolean,
+): boolean {
+  return value !== undefined && (!Number.isFinite(value) || !isValid(value));
+}
+
 /**
  * Avalia uma oferta contra as configurações operacionais. Função pura:
  * não acessa banco nem rede, recebe tudo already-computed via `context`.
@@ -27,13 +34,28 @@ export function evaluateOffer(
 ): EvaluationResult {
   // 1. Dados obrigatórios ausentes/incoerentes -> rejeita sem tentar adivinhar
   if (
-    !offer.shopeeItemId ||
-    !offer.name ||
-    !offer.url ||
+    typeof offer.shopeeItemId !== "string" ||
+    !offer.shopeeItemId.trim() ||
+    typeof offer.name !== "string" ||
+    !offer.name.trim() ||
+    typeof offer.url !== "string" ||
+    !offer.url.trim() ||
     typeof offer.currentPrice !== "number" ||
+    !Number.isFinite(offer.currentPrice) ||
     offer.currentPrice <= 0
   ) {
     return { accepted: false, reason: "INVALID_DATA", details: "Campos obrigatórios ausentes ou inválidos" };
+  }
+
+  if (
+    isInvalidOptionalNumber(offer.previousPrice, (value) => value > 0) ||
+    isInvalidOptionalNumber(offer.discountPercent, (value) => value >= 0 && value <= 100) ||
+    isInvalidOptionalNumber(offer.rating, (value) => value >= 0 && value <= 5) ||
+    isInvalidOptionalNumber(offer.ratingCount, (value) => Number.isInteger(value) && value >= 0) ||
+    isInvalidOptionalNumber(offer.salesCount, (value) => Number.isInteger(value) && value >= 0) ||
+    isInvalidOptionalNumber(offer.commissionPercent, (value) => value >= 0 && value <= 100)
+  ) {
+    return { accepted: false, reason: "INVALID_DATA", details: "Dados numéricos da oferta são inválidos" };
   }
 
   if (context.isDuplicateInRound) {
@@ -56,15 +78,23 @@ export function evaluateOffer(
     };
   }
 
-  if (offer.currentPrice < settings.minPrice || offer.currentPrice > settings.maxPrice) {
+  if (settings.minPrice !== null && offer.currentPrice < settings.minPrice) {
     return {
       accepted: false,
       reason: "PRICE_OUT_OF_RANGE",
-      details: `Preço ${offer.currentPrice} fora da faixa [${settings.minPrice}, ${settings.maxPrice}]`,
+      details: `Preço ${offer.currentPrice} abaixo do mínimo ${settings.minPrice}`,
     };
   }
 
-  if ((offer.discountPercent ?? 0) < settings.minDiscountPercent) {
+  if (settings.maxPrice !== null && offer.currentPrice > settings.maxPrice) {
+    return {
+      accepted: false,
+      reason: "PRICE_OUT_OF_RANGE",
+      details: `Preço ${offer.currentPrice} acima do máximo ${settings.maxPrice}`,
+    };
+  }
+
+  if (settings.minDiscountPercent !== null && (offer.discountPercent ?? 0) < settings.minDiscountPercent) {
     return {
       accepted: false,
       reason: "DISCOUNT_BELOW_MINIMUM",
@@ -72,7 +102,7 @@ export function evaluateOffer(
     };
   }
 
-  if ((offer.rating ?? 0) < settings.minRating) {
+  if (settings.minRating !== null && (offer.rating ?? 0) < settings.minRating) {
     return {
       accepted: false,
       reason: "RATING_BELOW_MINIMUM",
@@ -80,7 +110,7 @@ export function evaluateOffer(
     };
   }
 
-  if ((offer.ratingCount ?? 0) < settings.minRatingCount) {
+  if (settings.minRatingCount !== null && (offer.ratingCount ?? 0) < settings.minRatingCount) {
     return {
       accepted: false,
       reason: "REVIEWS_BELOW_MINIMUM",
@@ -88,7 +118,7 @@ export function evaluateOffer(
     };
   }
 
-  if ((offer.salesCount ?? 0) < settings.minSalesCount) {
+  if (settings.minSalesCount !== null && (offer.salesCount ?? 0) < settings.minSalesCount) {
     return {
       accepted: false,
       reason: "SALES_BELOW_MINIMUM",
@@ -96,7 +126,7 @@ export function evaluateOffer(
     };
   }
 
-  if ((offer.commissionPercent ?? 0) < settings.minCommissionPercent) {
+  if (settings.minCommissionPercent !== null && (offer.commissionPercent ?? 0) < settings.minCommissionPercent) {
     return {
       accepted: false,
       reason: "COMMISSION_BELOW_MINIMUM",

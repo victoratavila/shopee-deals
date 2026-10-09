@@ -159,7 +159,7 @@ describe("resiliência - banco de dados indisponível", () => {
 describe("resiliência - reinicialização/recuperação", () => {
   it("reconcileStaleRuns libera o sistema para novas execuções após um crash", async () => {
     const repos = lenientRepos();
-    repos.state.runs.push({ id: "stuck-run", status: "RUNNING" });
+    repos.state.runs.push({ id: "stuck-run", status: "RUNNING", triggeredBy: "test", startedAt: new Date() });
 
     expect(await repos.run.hasActiveRun()).toBe(true);
     const recovered = await repos.run.reconcileStaleRuns(60);

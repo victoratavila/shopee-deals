@@ -92,6 +92,31 @@ estão no `.env`. Duas limitações da API pública documentadas no código e no
 README: sem `ratingCount` por produto, e "preço anterior" é estimado a
 partir do desconto (não vem pronto da API).
 
+## Fluxo de aprovação (importante para a Fase 7)
+
+- **Aprovação automática** é o caminho normal: `runPipeline` aprova e
+  registra em `PublishedDeal` qualquer oferta que passe nos filtros, sem
+  intervenção humana. É esse registro que a Fase 7 vai usar como fila de
+  "pronto para publicar" no WhatsApp/Telegram.
+- **Aprovação manual** (`approveRejectedOfferManually`) é só uma exceção:
+  reverte uma rejeição específica. Nunca é uma etapa obrigatória do fluxo
+  normal, e propositalmente não reavalia filtros nem suspeita de preço -
+  isso anularia o propósito de existir (o humano está sobrepondo a decisão
+  automática de propósito).
+- Regras que a aprovação manual RESPEITA mesmo assim: publicação recente
+  (`minDaysBeforeRepublish`), limite diário (`maxOffersPerDay`), e
+  duplicidade - tanto para a MESMA rejeição (clique duplo, via
+  `claimManualApproval` atômico) quanto para DUAS rejeições DIFERENTES do
+  MESMO PRODUTO (via `createIfNotRecentlyPublished`, transação
+  Serializable no Postgres). Se a criação for recusada, a reivindicação é
+  desfeita automaticamente (a oferta não fica "presa" como aprovada sem
+  nada criado).
+- **Concorrência**: `RunRepository.create()` é atômico (lock de linha
+  única em `SchedulerLock`, ver `PrismaRunRepository`) - scheduler e
+  execução manual nunca rodam pipelines ao mesmo tempo. Isso é o que
+  garante que a mesma oferta nunca é aprovada/publicada duas vezes por
+  essa via.
+
 ## O que falta (não implementar sem pedir confirmação antes)
 
 - Execução real do deploy (guia pronto em `DEPLOY.md`: gratuito primeiro —

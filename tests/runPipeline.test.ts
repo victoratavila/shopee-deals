@@ -46,14 +46,14 @@ describe("runPipeline (integração com fakes)", () => {
 
   it("impede execução simultânea (ConcurrentRunError)", async () => {
     const repos = createInMemoryRepositories();
-    repos.state.runs.push({ id: "existing-run", status: "RUNNING" });
+    repos.state.runs.push({ id: "existing-run", status: "RUNNING", triggeredBy: "test", startedAt: new Date() });
 
     await expect(
       runPipeline({ shopeeClient: new MockShopeeClient(), repos, mode: "TEST", triggeredBy: "test" }),
     ).rejects.toBeInstanceOf(ConcurrentRunError);
   });
 
-  it("respeita o limite máximo de ofertas por rodada", async () => {
+  it("respeita o limite de aprovações e registra os produtos buscados além do limite como rejeitados", async () => {
     const repos = createInMemoryRepositories({
       minDiscountPercent: 0,
       minRatingCount: 0,
@@ -69,6 +69,26 @@ describe("runPipeline (integração com fakes)", () => {
 
     expect(result.dealsSelected).toBe(1);
     expect(result.rejected.some((r) => r.reason === "ROUND_LIMIT_REACHED")).toBe(true);
+    expect(repos.state.rejected).toHaveLength(result.productsFiltered);
+  });
+
+  it("maxOffersPerRound null remove o limite por rodada", async () => {
+    const repos = createInMemoryRepositories({
+      minDiscountPercent: 0,
+      minRatingCount: 0,
+      minSalesCount: 0,
+      minRating: 0,
+      minCommissionPercent: 0,
+      maxOffersPerRound: null,
+    });
+    const result = await runPipeline({
+      shopeeClient: new MockShopeeClient(),
+      repos,
+      mode: "TEST",
+      triggeredBy: "test",
+    });
+
+    expect(result.rejected.some((r) => r.reason === "ROUND_LIMIT_REACHED")).toBe(false);
   });
 
   it("uma falha em um produto não interrompe o processamento dos demais", async () => {

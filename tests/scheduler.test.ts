@@ -34,6 +34,7 @@ describe("decideTick", () => {
     intervalBetweenRoundsMinutes: 60,
     lastRunFinishedAt: null as Date | null,
     hasActiveRun: false,
+    dailyLimitReached: false,
   };
 
   it("roda quando todas as condições são satisfeitas", () => {
