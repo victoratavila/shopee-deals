@@ -531,10 +531,9 @@ async function openDetailModal(kind, id) {
         : await api(`/api/deals/${id}`);
 
     const title = data.productName || data.shopeeItemId || "Produto";
-    const thumb = data.imageUrl || data.productImageUrl;
+    const imageUrl = data.imageUrl || data.productImageUrl;
 
     let html = "";
-    html += thumb ? `<img class="modal-thumb" src="${thumb}" alt="" />` : "";
     html += `<h3 class="modal-title">${title}</h3>`;
 
     html += '<div class="modal-section-title">Preço e desconto</div>';
@@ -600,6 +599,39 @@ async function openDetailModal(kind, id) {
     if (actions) html += `<div class="modal-actions">${actions}</div>`;
 
     content.innerHTML = html;
+    const image = document.createElement("img");
+    image.className = "modal-product-image";
+    image.alt = `Imagem do produto ${title}`;
+    image.loading = "eager";
+    image.decoding = "async";
+    image.addEventListener("error", () => {
+      const placeholder = document.createElement("div");
+      placeholder.className = "modal-product-image-placeholder";
+      placeholder.textContent = "Imagem do produto indisponível";
+      image.replaceWith(placeholder);
+    });
+
+    if (imageUrl) {
+      try {
+        const parsedImageUrl = new URL(imageUrl);
+        if (parsedImageUrl.protocol === "https:" || parsedImageUrl.protocol === "http:") {
+          image.src = parsedImageUrl.href;
+          content.prepend(image);
+        } else {
+          throw new Error("Unsupported product image URL protocol");
+        }
+      } catch {
+        const placeholder = document.createElement("div");
+        placeholder.className = "modal-product-image-placeholder";
+        placeholder.textContent = "Imagem do produto indisponível";
+        content.prepend(placeholder);
+      }
+    } else {
+      const placeholder = document.createElement("div");
+      placeholder.className = "modal-product-image-placeholder";
+      placeholder.textContent = "Imagem do produto indisponível";
+      content.prepend(placeholder);
+    }
   } catch (e) {
     content.innerHTML = `<p class="msg error">${e.message}</p>`;
   }

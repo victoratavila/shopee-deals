@@ -21,6 +21,7 @@ describe("dados completos para o modal de detalhes", () => {
     expect(detail).not.toBeNull();
     expect(detail!.productName).toBeTruthy();
     expect(detail!.productUrl).toBeTruthy();
+    expect(detail!.productImageUrl).toBeTruthy();
     expect(detail!.currentPrice).not.toBeNull();
     expect(detail!.dealScore).toBeGreaterThan(0);
     expect(detail!.channel).toBe("TEST");
@@ -44,6 +45,7 @@ describe("dados completos para o modal de detalhes", () => {
     // O snapshot já guardava esses campos - agora o endpoint os expõe.
     expect(snapshot.name).toBeTruthy();
     expect(snapshot.url).toBeTruthy();
+    expect(snapshot.imageUrl).toBeTruthy();
     expect(snapshot.currentPrice).toBeGreaterThan(0);
     expect(detail!.reason).toBeTruthy();
     expect(detail!.createdAt).toBeInstanceOf(Date);

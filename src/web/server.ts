@@ -80,7 +80,13 @@ export async function buildWebServer(deps: WebServerDeps): Promise<FastifyInstan
   const app = Fastify({ logger: true, trustProxy: true });
   const authService = createAdminAuthService(prisma);
 
-  await app.register(fastifyHelmet);
+  await app.register(fastifyHelmet, {
+    contentSecurityPolicy: {
+      directives: {
+        imgSrc: ["'self'", "data:", "https:"],
+      },
+    },
+  });
   await app.register(fastifyCookie);
   await app.register(fastifySession, {
     secret: sessionSecret,
